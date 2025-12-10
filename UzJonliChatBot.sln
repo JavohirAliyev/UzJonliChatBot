@@ -2,8 +2,6 @@
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JonliChatBot", "JonliChatBot.csproj", "{23C4355D-F530-811F-5774-E7B2778F8FF9}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UzJonliChatBot.Application", "UzJonliChatBot.Application\UzJonliChatBot.Application.csproj", "{4B74122F-7C59-4EA2-A8C3-1494C03F9719}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UzJonliChatBot.Infrastructure", "UzJonliChatBot.Infrastructure\UzJonliChatBot.Infrastructure.csproj", "{05A2E38A-070A-4908-B6A9-293BF399BCC0}"

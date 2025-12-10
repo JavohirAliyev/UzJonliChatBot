@@ -1,2 +1,80 @@
-﻿// See https://aka.ms/new-console-template for more information
-Console.WriteLine("Hello, World!");
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using UzJonliChatBot.Application.Interfaces;
+using UzJonliChatBot.Application.Services;
+using UzJonliChatBot.Infrastructure.Persistence;
+using UzJonliChatBot.Infrastructure.Persistence.Repositories;
+using UzJonliChatBot.Infrastructure.Telegram;
+
+namespace UzJonliChatBot.BotHost;
+
+public class Program
+{
+    public static async Task Main(string[] args)
+    {
+        var host = CreateHostBuilder(args).Build();
+
+        using (var scope = host.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
+            await DatabaseInitializationService.InitializeAsync(dbContext);
+        }
+        
+        // Get the Telegram service and start the bot
+        var telegramService = host.Services.GetRequiredService<TelegramService>();
+        var cts = new CancellationTokenSource();
+
+        // Handle graceful shutdown
+        Console.CancelKeyPress += (s, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+
+        try
+        {
+            await telegramService.StartAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("Bot stopped.");
+        }
+    }
+
+    public static IHostBuilder CreateHostBuilder(string[] args) =>
+        Host.CreateDefaultBuilder(args)
+            .ConfigureAppConfiguration((context, config) =>
+            {
+                config.AddJsonFile("UzJonliChatBot.BotHost/appSettings.json", optional: false, reloadOnChange: true);
+                config.AddJsonFile($"appSettings.{context.HostingEnvironment.EnvironmentName}.json", optional: true);
+                config.AddEnvironmentVariables();
+            })
+            .ConfigureServices((context, services) =>
+            {
+                // Register database context
+                var connectionString = context.Configuration.GetConnectionString("DefaultConnection")
+                    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+
+                services.AddDbContext<ChatBotDbContext>(options =>
+                    options.UseNpgsql(connectionString));
+
+                // Register repositories
+                services.AddScoped<IUserRepository, UserRepository>();
+                services.AddScoped<IChatRepository, ChatRepository>();
+                services.AddScoped<IMatchmakingQueueRepository, MatchmakingQueueRepository>();
+
+                // Register application services
+                services.AddSingleton<IUserService, UserService>();
+                services.AddSingleton<IRegistrationService, RegistrationService>();
+                services.AddSingleton<IMatchmakingService, MatchmakingService>();
+                services.AddSingleton<IChatService, ChatService>();
+
+                // Register infrastructure services
+                var botClient = TelegramBotClientFactory.Create(context.Configuration);
+                services.AddSingleton(botClient);
+                services.AddSingleton<TelegramUpdateHandler>();
+                services.AddSingleton<TelegramService>();
+            });
+}

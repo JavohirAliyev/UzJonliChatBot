@@ -1,0 +1,84 @@
+using Microsoft.EntityFrameworkCore;
+using UzJonliChatBot.Infrastructure.Persistence.Entities;
+
+namespace UzJonliChatBot.Infrastructure.Persistence;
+
+/// <summary>
+/// Database context for UzJonliChatBot.
+/// </summary>
+public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbContext(options)
+{
+    public DbSet<UserEntity> Users { get; set; } = null!;
+    public DbSet<ActiveChatEntity> ActiveChats { get; set; } = null!;
+    public DbSet<MatchmakingQueueEntity> MatchmakingQueue { get; set; } = null!;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        // Users table configuration
+        modelBuilder.Entity<UserEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.TelegramId).IsUnique();
+            
+            entity.Property(e => e.TelegramId).IsRequired();
+            entity.Property(e => e.Gender).IsRequired().HasMaxLength(10);
+            entity.Property(e => e.IsAgeVerified).IsRequired();
+            entity.Property(e => e.RegistrationStatus).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt);
+
+            entity.HasMany(e => e.ChatsAsUser1)
+                .WithOne(c => c.User1)
+                .HasForeignKey(c => c.User1Id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.ChatsAsUser2)
+                .WithOne(c => c.User2)
+                .HasForeignKey(c => c.User2Id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.QueueEntry)
+                .WithOne(q => q.User)
+                .HasForeignKey<MatchmakingQueueEntity>(q => q.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ActiveChats table configuration
+        modelBuilder.Entity<ActiveChatEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.User1Id, e.User2Id }).IsUnique();
+            
+            entity.Property(e => e.User1Id).IsRequired();
+            entity.Property(e => e.User2Id).IsRequired();
+            entity.Property(e => e.StartedAt).IsRequired();
+
+            entity.HasOne(e => e.User1)
+                .WithMany(u => u.ChatsAsUser1)
+                .HasForeignKey(e => e.User1Id)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User2)
+                .WithMany(u => u.ChatsAsUser2)
+                .HasForeignKey(e => e.User2Id)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // MatchmakingQueue table configuration
+        modelBuilder.Entity<MatchmakingQueueEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId).IsUnique();
+            
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.QueuedAt).IsRequired();
+
+            entity.HasOne(e => e.User)
+                .WithOne(u => u.QueueEntry)
+                .HasForeignKey<MatchmakingQueueEntity>(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+}

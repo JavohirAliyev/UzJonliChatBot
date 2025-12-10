@@ -3,31 +3,48 @@ namespace UzJonliChatBot.Application.Services;
 using UzJonliChatBot.Application.Interfaces;
 using UzJonliChatBot.Application.Models;
 
+/// <summary>
+/// Service for managing active chats between users.
+/// </summary>
 public class ChatService : IChatService
 {
-    private readonly Dictionary<long, ChatState> _activeChats = new();
+    private readonly IChatRepository _chatRepository;
 
-    public bool IsInChat(long userId) => _activeChats.ContainsKey(userId);
+    public ChatService(IChatRepository chatRepository)
+    {
+        _chatRepository = chatRepository;
+    }
 
-    public long? GetPartner(long userId) =>
-        _activeChats.TryGetValue(userId, out var state)
-            ? state.PartnerId
-            : (long?)null;
+    public bool IsInChat(long userId)
+    {
+        return _chatRepository.IsInChatAsync(userId).Result;
+    }
+
+    public long? GetPartner(long userId)
+    {
+        var chat = _chatRepository.GetActiveChatAsync(userId).Result;
+        if (chat == null)
+            return null;
+
+        return chat.User1Id == userId ? chat.User2Id : chat.User1Id;
+    }
 
     public void CreateChat(long user1, long user2)
     {
-        _activeChats[user1] = new ChatState { PartnerId = user2 };
-        _activeChats[user2] = new ChatState { PartnerId = user1 };
+        var chat = new Chat
+        {
+            User1Id = user1,
+            User2Id = user2
+        };
+        _chatRepository.AddAsync(chat).Wait();
     }
 
     public void EndChat(long userId)
     {
-        if (!_activeChats.TryGetValue(userId, out var state))
-            return;
-
-        long partnerId = state.PartnerId;
-
-        _activeChats.Remove(userId);
-        _activeChats.Remove(partnerId);
+        var chat = _chatRepository.GetActiveChatAsync(userId).Result;
+        if (chat != null)
+        {
+            _chatRepository.RemoveAsync(chat).Wait();
+        }
     }
 }
