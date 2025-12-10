@@ -47,8 +47,7 @@ public class Program
         Host.CreateDefaultBuilder(args)
             .ConfigureAppConfiguration((context, config) =>
             {
-                config.AddJsonFile("UzJonliChatBot.BotHost/appSettings.json", optional: false, reloadOnChange: true);
-                config.AddJsonFile($"appSettings.{context.HostingEnvironment.EnvironmentName}.json", optional: true);
+                config.AddJsonFile("UzJonliChatBot.BotHost/appSettings.json", optional: true, reloadOnChange: true);
                 config.AddEnvironmentVariables();
             })
             .ConfigureServices((context, services) =>
