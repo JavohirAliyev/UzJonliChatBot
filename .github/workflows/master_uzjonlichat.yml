@@ -58,4 +58,6 @@ jobs:
         with:
           app-name: 'uzjonlichat'
           slot-name: 'Production'
-          package: ${{env.DOTNET_ROOT}}/myapp
+          # Use the artifact folder downloaded by the previous step
+          # download-artifact extracts the artifact into a folder named after the artifact (bothost-app)
+          package: ${{ github.workspace }}/bothost-app
