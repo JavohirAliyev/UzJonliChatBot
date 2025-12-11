@@ -18,56 +18,50 @@ public class Program
     {
         var host = CreateHostBuilder(args).Build();
 
-        try
+        var logger = host.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Host built. Starting application...");
+
+        // Initialize database before starting hosted services
+        using (var scope = host.Services.CreateScope())
         {
-            var logger = host.Services.GetRequiredService<ILogger<Program>>();
-            logger.LogInformation("Host built. Starting application...");
-
-            using (var scope = host.Services.CreateScope())
-            {
-                try
-                {
-                    logger.LogInformation("Starting database initialization...");
-                    var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
-                    await DatabaseInitializationService.InitializeAsync(dbContext);
-                    logger.LogInformation("Database initialization completed successfully.");
-                }
-                catch (Exception ex)
-                {
-                    logger.LogCritical(ex, "Database initialization failed.");
-                    throw;
-                }
-            }
-
-            var telegramService = host.Services.GetRequiredService<TelegramService>();
-            var cts = new CancellationTokenSource();
-
-            Console.CancelKeyPress += (s, e) =>
-            {
-                e.Cancel = true;
-                cts.Cancel();
-                logger.LogInformation("Cancellation requested via Console.CancelKeyPress.");
-            };
-
             try
             {
-                logger.LogInformation("Starting Telegram service...");
-                await telegramService.StartAsync(cts.Token);
-                logger.LogInformation("Telegram service stopped gracefully.");
-            }
-            catch (OperationCanceledException)
-            {
-                logger.LogInformation("Bot stopped by cancellation.");
+                logger.LogInformation("Starting database initialization...");
+                var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
+                await DatabaseInitializationService.InitializeAsync(dbContext);
+                logger.LogInformation("Database initialization completed successfully.");
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Unhandled exception while running Telegram service.");
+                logger.LogCritical(ex, "Database initialization failed.");
                 throw;
             }
         }
-        finally
+
+        // Set up graceful shutdown on Ctrl+C
+        var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (s, e) =>
         {
-            host.Dispose();
+            e.Cancel = true;
+            cts.Cancel();
+            logger.LogInformation("Cancellation requested via Console.CancelKeyPress.");
+        };
+
+        try
+        {
+            logger.LogInformation("Starting hosted services...");
+            // RunAsync will start all IHostedService implementations (TelegramService, HealthCheckHostedService)
+            await host.RunAsync(cts.Token);
+            logger.LogInformation("Application stopped gracefully.");
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation("Application stopped by cancellation.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Unhandled exception while running application.");
+            throw;
         }
     }
 
@@ -128,11 +122,11 @@ public class Program
                 var botClient = TelegramBotClientFactory.Create(context.Configuration);
                 services.AddSingleton(botClient);
                 services.AddSingleton<TelegramUpdateHandler>();
-                services.AddSingleton<TelegramService>();
-                tempLogger.LogInformation("Registered Telegram related services.");
+                tempLogger.LogInformation("Registered Telegram infrastructure services.");
 
-                // Register health check hosted service (HTTP health endpoint)
+                // Register hosted services (these will start automatically when host runs)
+                services.AddHostedService<TelegramService>();
                 services.AddHostedService<HealthCheckHostedService>();
-                tempLogger.LogInformation("Registered HealthCheckHostedService.");
+                tempLogger.LogInformation("Registered hosted services (TelegramService, HealthCheckHostedService).");
             });
 }

@@ -24,7 +24,18 @@ public class HealthCheckHostedService : IHostedService, IDisposable
         _services = services;
         _logger = logger;
         _configuration = configuration;
-        _port = _configuration.GetValue<int?>("Health:Port") ?? 5005;
+        
+        // Azure Web Apps expose the port via WEBSITE_PORT environment variable
+        // Default to 80 for Azure, or use configured port, or fallback to 5005 for local dev
+        var websitePort = Environment.GetEnvironmentVariable("WEBSITE_PORT");
+        if (!string.IsNullOrEmpty(websitePort) && int.TryParse(websitePort, out var azurePort))
+        {
+            _port = azurePort;
+        }
+        else
+        {
+            _port = _configuration.GetValue<int?>("Health:Port") ?? 5005;
+        }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -32,13 +43,15 @@ public class HealthCheckHostedService : IHostedService, IDisposable
         _logger.LogInformation("Starting HealthCheckHostedService on port {Port}", _port);
 
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://localhost:{_port}/");
+        // Listen on all interfaces (*) so Azure's load balancer can reach it
+        // Use + as shorthand for all interfaces (works on both Windows and Linux)
+        _listener.Prefixes.Add($"http://+:{_port}/");
         _listener.Start();
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _listenTask = Task.Run(() => ListenLoopAsync(_cts.Token), CancellationToken.None);
 
-        _logger.LogInformation("Health endpoint listening at http://localhost:{Port}/health and /healthz", _port);
+        _logger.LogInformation("Health endpoint listening on port {Port} at /health and /healthz", _port);
         return Task.CompletedTask;
     }
 
