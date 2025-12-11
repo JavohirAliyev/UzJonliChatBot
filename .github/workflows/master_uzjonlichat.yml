@@ -27,13 +27,13 @@ jobs:
         run: dotnet build --configuration Release
 
       - name: dotnet publish
-        run: dotnet publish UzJonliChatBot.BotHost/UzJonliChatBot.BotHost.csproj -c Release -o ${{env.DOTNET_ROOT}}/myapp
+        run: dotnet publish UzJonliChatBot.BotHost/UzJonliChatBot.BotHost.csproj -c Release -o ./publish
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: .net-app
-          path: ${{env.DOTNET_ROOT}}/myapp
+          path: ./publish
 
   deploy:
     runs-on: ubuntu-latest
@@ -47,6 +47,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: .net-app
+          path: ./publish
       
       - name: Login to Azure
         uses: azure/login@v2
@@ -61,5 +62,6 @@ jobs:
         with:
           app-name: 'uzjonlichat'
           slot-name: 'Production'
-          package: .
+          package: ./publish
+          startup-command: 'dotnet UzJonliChatBot.BotHost.dll'
           

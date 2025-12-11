@@ -18,49 +18,56 @@ public class Program
     {
         var host = CreateHostBuilder(args).Build();
 
-        var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("Host built. Starting application...");
-
-        using (var scope = host.Services.CreateScope())
+        try
         {
+            var logger = host.Services.GetRequiredService<ILogger<Program>>();
+            logger.LogInformation("Host built. Starting application...");
+
+            using (var scope = host.Services.CreateScope())
+            {
+                try
+                {
+                    logger.LogInformation("Starting database initialization...");
+                    var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
+                    await DatabaseInitializationService.InitializeAsync(dbContext);
+                    logger.LogInformation("Database initialization completed successfully.");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogCritical(ex, "Database initialization failed.");
+                    throw;
+                }
+            }
+
+            var telegramService = host.Services.GetRequiredService<TelegramService>();
+            var cts = new CancellationTokenSource();
+
+            Console.CancelKeyPress += (s, e) =>
+            {
+                e.Cancel = true;
+                cts.Cancel();
+                logger.LogInformation("Cancellation requested via Console.CancelKeyPress.");
+            };
+
             try
             {
-                logger.LogInformation("Starting database initialization...");
-                var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
-                await DatabaseInitializationService.InitializeAsync(dbContext);
-                logger.LogInformation("Database initialization completed successfully.");
+                logger.LogInformation("Starting Telegram service...");
+                await telegramService.StartAsync(cts.Token);
+                logger.LogInformation("Telegram service stopped gracefully.");
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogInformation("Bot stopped by cancellation.");
             }
             catch (Exception ex)
             {
-                logger.LogCritical(ex, "Database initialization failed.");
+                logger.LogError(ex, "Unhandled exception while running Telegram service.");
                 throw;
             }
         }
-
-        var telegramService = host.Services.GetRequiredService<TelegramService>();
-        var cts = new CancellationTokenSource();
-
-        Console.CancelKeyPress += (s, e) =>
+        finally
         {
-            e.Cancel = true;
-            cts.Cancel();
-            logger.LogInformation("Cancellation requested via Console.CancelKeyPress.");
-        };
-
-        try
-        {
-            logger.LogInformation("Starting Telegram service...");
-            await telegramService.StartAsync(cts.Token);
-            logger.LogInformation("Telegram service stopped gracefully.");
-        }
-        catch (OperationCanceledException)
-        {
-            logger.LogInformation("Bot stopped by cancellation.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Unhandled exception while running Telegram service.");
-            throw;
+            host.Dispose();
         }
     }
 
@@ -71,7 +78,7 @@ public class Program
                 var env = context.HostingEnvironment;
 
                 config.SetBasePath(env.ContentRootPath)
-                    .AddJsonFile("appSettings.json", optional: false, reloadOnChange: true)
+                    .AddJsonFile("appSettings.json", optional: true, reloadOnChange: true)
                     .AddJsonFile($"appSettings.{env.EnvironmentName}.json", optional: true, reloadOnChange: true)
                     .AddEnvironmentVariables()
                     .AddCommandLine(args);
