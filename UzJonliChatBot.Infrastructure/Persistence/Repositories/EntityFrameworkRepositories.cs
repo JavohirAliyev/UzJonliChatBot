@@ -176,12 +176,14 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task<long?> DequeueAsync()
     {
-        // Use a transaction with serializable isolation level to prevent race conditions
-        // This ensures that concurrent dequeue operations don't return the same user
-        // Retry logic handles serialization failures that can occur with high concurrency
-        const int maxRetries = 3;
-        for (int attempt = 0; attempt < maxRetries; attempt++)
+        // Use execution strategy to wrap the transaction - this is required when using
+        // retry strategies with explicit transactions in EF Core
+        var strategy = _context.Database.CreateExecutionStrategy();
+        
+        return await strategy.ExecuteAsync<long?>(async () =>
         {
+            // Use a transaction with serializable isolation level to prevent race conditions
+            // This ensures that concurrent dequeue operations don't return the same user
             using var transaction = await _context.Database.BeginTransactionAsync(
                 System.Data.IsolationLevel.Serializable);
             try
@@ -209,21 +211,12 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
                 return telegramId;
             }
-            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
-            {
-                // Another transaction modified the data, retry
-                await transaction.RollbackAsync();
-                if (attempt == maxRetries - 1) throw;
-                await Task.Delay(10 * (attempt + 1)); // Exponential backoff
-            }
             catch
             {
                 await transaction.RollbackAsync();
                 throw;
             }
-        }
-
-        return null;
+        });
     }
 
     public async Task RemoveFromQueueAsync(long telegramId)
