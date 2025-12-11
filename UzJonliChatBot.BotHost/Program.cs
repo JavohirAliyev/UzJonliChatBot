@@ -53,8 +53,22 @@ public class Program
             .ConfigureServices((context, services) =>
             {
                 // Register database context
-                var connectionString = context.Configuration.GetConnectionString("DefaultConnection")
-                    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+                var connectionString = context.Configuration.GetConnectionString("DefaultConnection");
+
+                if (string.IsNullOrWhiteSpace(connectionString))
+                {
+                    // Try common environment variable fallbacks (double-underscore maps to ':')
+                    connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+                                       ?? Environment.GetEnvironmentVariable("DefaultConnection")
+                                       ?? Environment.GetEnvironmentVariable("SQLCONNSTR_DefaultConnection")
+                                       ?? Environment.GetEnvironmentVariable("MYSQLCONNSTR_DefaultConnection")
+                                       ?? Environment.GetEnvironmentVariable("CUSTOMCONNSTR_DefaultConnection");
+                }
+
+                if (string.IsNullOrWhiteSpace(connectionString))
+                {
+                    throw new InvalidOperationException("Connection string 'DefaultConnection' not found. Provide 'ConnectionStrings:DefaultConnection' in configuration or set environment variable 'ConnectionStrings__DefaultConnection' (or Azure connection string named 'DefaultConnection').");
+                }
 
                 services.AddDbContext<ChatBotDbContext>(options =>
                     options.UseNpgsql(connectionString));
