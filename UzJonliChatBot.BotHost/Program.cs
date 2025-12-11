@@ -21,7 +21,7 @@ public class Program
             var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
             await DatabaseInitializationService.InitializeAsync(dbContext);
         }
-        
+
         // Get the Telegram service and start the bot
         var telegramService = host.Services.GetRequiredService<TelegramService>();
         var cts = new CancellationTokenSource();
@@ -57,12 +57,7 @@ public class Program
 
                 if (string.IsNullOrWhiteSpace(connectionString))
                 {
-                    // Try common environment variable fallbacks (double-underscore maps to ':')
-                    connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-                                       ?? Environment.GetEnvironmentVariable("DefaultConnection")
-                                       ?? Environment.GetEnvironmentVariable("SQLCONNSTR_DefaultConnection")
-                                       ?? Environment.GetEnvironmentVariable("MYSQLCONNSTR_DefaultConnection")
-                                       ?? Environment.GetEnvironmentVariable("CUSTOMCONNSTR_DefaultConnection");
+                    connectionString = Environment.GetEnvironmentVariable("AZURE_POSTGRESQL_CONNECTIONSTRING");
                 }
 
                 if (string.IsNullOrWhiteSpace(connectionString))
