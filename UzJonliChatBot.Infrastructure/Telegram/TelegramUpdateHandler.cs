@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -17,13 +18,16 @@ public class TelegramUpdateHandler
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ITelegramBotClient _botClient;
+    private readonly ILogger<TelegramUpdateHandler> _logger;
 
     public TelegramUpdateHandler(
         IServiceProvider serviceProvider,
-        ITelegramBotClient botClient)
+        ITelegramBotClient botClient,
+        ILogger<TelegramUpdateHandler> logger)
     {
         _serviceProvider = serviceProvider;
         _botClient = botClient;
+        _logger = logger;
     }
 
     /// <summary>
@@ -47,7 +51,8 @@ public class TelegramUpdateHandler
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error handling update: {ex.Message}");
+            _logger.LogError(ex, "Error handling update {UpdateId} from user {UserId}", 
+                update.Id, update.Message?.Chat.Id ?? update.CallbackQuery?.From.Id ?? 0);
         }
     }
 
@@ -108,7 +113,7 @@ public class TelegramUpdateHandler
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error handling callback: {ex.Message}");
+            _logger.LogError(ex, "Error handling callback query {CallbackId} from user {UserId}", callbackId, userId);
             await _botClient.AnswerCallbackQuery(callbackId, BotMessages.Error, showAlert: true);
         }
     }
@@ -190,14 +195,14 @@ public class TelegramUpdateHandler
         }
 
         // Check if user is already waiting
-        if (matchmakingService.IsWaiting(userId))
+        if (await matchmakingService.IsWaitingAsync(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.WaitingForPartner);
             return;
         }
 
         // Try to find a partner
-        var partner = matchmakingService.DequeueUser();
+        var partner = await matchmakingService.DequeueUserAsync();
 
         if (partner.HasValue)
         {
@@ -211,7 +216,7 @@ public class TelegramUpdateHandler
         else
         {
             // No partner available - add to queue
-            matchmakingService.EnqueueUser(userId);
+            await matchmakingService.EnqueueUserAsync(userId);
             await _botClient.SendMessage(userId, BotMessages.WaitingForPartner);
         }
     }
@@ -239,9 +244,9 @@ public class TelegramUpdateHandler
         }
 
         // Check if user is waiting in the matchmaking queue
-        if (matchmakingService.IsWaiting(userId))
+        if (await matchmakingService.IsWaitingAsync(userId))
         {
-            matchmakingService.RemoveFromQueue(userId);
+            await matchmakingService.RemoveFromQueueAsync(userId);
             await _botClient.SendMessage(userId, BotMessages.SearchStopped, replyMarkup: replyMarkup);
             return;
         }
@@ -281,7 +286,7 @@ public class TelegramUpdateHandler
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error forwarding message: {ex.Message}");
+            _logger.LogError(ex, "Error forwarding message from user {UserId} to partner {PartnerId}", userId, partnerId.Value);
             await _botClient.SendMessage(userId, BotMessages.Error);
         }
     }
@@ -325,9 +330,8 @@ public class TelegramUpdateHandler
 
         var genderText = user.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
         var profileMessage = $"👤 Sizning Profilingiz\n\n" +
-            $"Jinsiyat: {genderText}\n" +
-            $"Yosh: 18+\n" +
-            $"Ro'yxatga olindi: {user.CreatedAt:dd.MM.yyyy}";
+            $"Jins: {genderText}\n" +
+            $"Ro'yxatga olindi: {user.CreatedAt:dd.MM.yyyy HH:mm}";
 
         await _botClient.SendMessage(userId, profileMessage, replyMarkup: GetMainKeyboard());
     }

@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
@@ -78,11 +79,43 @@ public class TelegramService : IHostedService, IDisposable
                     continue;
                 }
 
-                foreach (var update in updates)
+                // Process updates in parallel to handle multiple users simultaneously
+                // Each update is processed independently, allowing concurrent handling
+                var updateTasks = updates.Select(update =>
                 {
-                    await _updateHandler.HandleUpdateAsync(update);
-                    offset = update.Id + 1;
-                }
+                    // Fire-and-forget: process each update asynchronously without blocking
+                    // This allows multiple users to interact with the bot simultaneously
+                    return Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _updateHandler.HandleUpdateAsync(update);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error processing update {UpdateId} from user {UserId}", 
+                                update.Id, update.Message?.Chat.Id ?? update.CallbackQuery?.From.Id ?? 0);
+                        }
+                    }, cancellationToken);
+                }).ToArray();
+
+                // Don't await here - let updates process in parallel
+                // The offset will be updated immediately so we can fetch new updates
+                // even if current ones are still processing
+                
+                // Track completion for logging purposes (fire-and-forget)
+                _ = Task.WhenAll(updateTasks).ContinueWith(t =>
+                {
+                    if (t.IsFaulted && t.Exception != null)
+                    {
+                        _logger.LogError(t.Exception.GetBaseException(), 
+                            "One or more updates failed to process. Batch size: {Count}", updates.Length);
+                    }
+                }, TaskContinuationOptions.OnlyOnFaulted);
+
+                // Update offset to the highest update ID immediately
+                // This ensures we fetch new updates even if current batch is still processing
+                offset = updates.Max(u => u.Id) + 1;
             }
             catch (OperationCanceledException)
             {

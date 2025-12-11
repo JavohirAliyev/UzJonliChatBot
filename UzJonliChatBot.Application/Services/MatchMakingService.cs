@@ -14,23 +14,23 @@ public class MatchmakingService : IMatchmakingService
         _queueRepository = queueRepository;
     }
 
-    public bool IsWaiting(long userId)
+    public async Task<bool> IsWaitingAsync(long userId)
     {
-        return _queueRepository.IsInQueueAsync(userId).Result;
+        return await _queueRepository.IsInQueueAsync(userId);
     }
 
-    public void EnqueueUser(long userId)
+    public async Task EnqueueUserAsync(long userId)
     {
-        _queueRepository.EnqueueAsync(userId).Wait();
+        await _queueRepository.EnqueueAsync(userId);
     }
 
-    public long? DequeueUser()
+    public async Task<long?> DequeueUserAsync()
     {
-        return _queueRepository.DequeueAsync().Result;
+        return await _queueRepository.DequeueAsync();
     }
 
-    public void RemoveFromQueue(long userId)
+    public async Task RemoveFromQueueAsync(long userId)
     {
-        _queueRepository.RemoveFromQueueAsync(userId).Wait();
+        await _queueRepository.RemoveFromQueueAsync(userId);
     }
 }

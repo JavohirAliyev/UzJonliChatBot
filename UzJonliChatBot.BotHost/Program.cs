@@ -5,7 +5,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using UzJonliChatBot.Application.Interfaces;
 using UzJonliChatBot.Application.Services;
-using UzJonliChatBot.BotHost.Services;
 using UzJonliChatBot.Infrastructure.Persistence;
 using UzJonliChatBot.Infrastructure.Persistence.Repositories;
 using UzJonliChatBot.Infrastructure.Telegram;
@@ -126,7 +125,6 @@ public class Program
 
                 // Register hosted services (these will start automatically when host runs)
                 services.AddHostedService<TelegramService>();
-                services.AddHostedService<HealthCheckHostedService>();
                 tempLogger.LogInformation("Registered hosted services (TelegramService, HealthCheckHostedService).");
             });
 }
