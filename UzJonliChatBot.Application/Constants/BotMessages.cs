@@ -6,56 +6,58 @@ namespace UzJonliChatBot.Application.Constants;
 public static class BotMessages
 {
     // Welcome & Registration Messages
-    public const string Welcome = "👋 Uzjonli chatbotiga xush kelibsiz!\n\n" +
-        "Anonim tarzda boshqa foydalanuvchilar bilan suhbat qiling.\n\n" +
-        "Buyruqlar:\n" +
-        "/keyingi - Yangi suhbatni boshlash\n" +
-        "/stop - Suhbatni tugatish";
+    public const string Welcome = "👋 Tanishuv chatga xush kelibsiz!\n\n" +
+        "Anonim suhbatlar orqali yangi do'stlar toping.\n\n" +
+        "/keyingi - Yangi suhbat\n" +
+        "/stop - Chiqish";
 
-    public const string MenuButtonFindPartner = "🔍 Topish";
-    public const string MenuButtonStopChat = "❌ Tugatish";
+    public const string MenuButtonFindPartner = "🔍 Suhbatdosh topish";
+    public const string MenuButtonStopChat = "⏹️ Tugatish";
     public const string MenuButtonProfile = "👤 Profil";
 
-    public const string GenderSelectionPrompt = "🚀 Boshlash uchun jinsiyatingizni tanlang:\n\n" +
-        "Ushbu ma'lumot faqat suhbat sherikin tanlash uchun kerak.";
+    public const string GenderSelectionPrompt = "👋 Boshladik!\n\n" +
+        "Jinsingizni tanlang:";
 
     public const string GenderButtonMale = "👨 Erkak";
     public const string GenderButtonFemale = "👩 Ayol";
 
-    public const string AgeVerificationPrompt = "⚠️ MUHIM: Siz 18 yoki undan katta yoshdasiz ekanligini tasdiqlamoqchimiz.\n\n" +
-        "Davom etish uchun pastdagi tugmani bosing.";
+    public const string AgeVerificationPrompt = "⚠️ Davom etish uchun kamida 18 yosh ekanligingizni tasdiqlang.";
 
-    public const string AgeVerificationButton = "✅ Ha, men 18+ yoshdaman";
+    public const string AgeVerificationButton = "✅ Tasdiqlash";
 
-    public const string RegistrationComplete = "✅ Registratsiya tugallandi!\n\n" +
-        "Suhbatni boshlash uchun tugmalarni ishlating.";
+    public const string RegistrationComplete = "✅ Tayyor!\n\n" +
+        "Suhbatdosh topish uchun \"🔍 Suhbatdosh topish\" yoki /keyingi tugmasini bosing.";
 
     // Chat Messages
-    public const string FoundPartner = "✅ Suhbat sherigi topildi!\n\n" +
-        "Suhbatni tugatish uchun \"❌ Tugatish\" tugmasini bosing.";
+    public const string FoundPartner = "🎉 Suhbatdosh topildi!\n\n" +
+        "Suhbatni boshlang 👇";
 
-    public const string WaitingForPartner = "⏳ Suhbat sheriği izlanmoqda...\n\n" +
-        "Iltimos kuting yoki \"❌ Tugatish\" tugmasini bosing.";
+    public const string WaitingForPartner = "⏳ Suhbatdosh qidirilmoqda...\n\n" +
+        "Iltimos kuting 😊";
 
     public const string ChatEnded = "👋 Suhbat tugatildi.\n\n" +
-        "Yangi suhbatni boshlash uchun \"🔍 Topish\" tugmasini bosing.";
+        "Yangi suhbat uchun \"🔍 Suhbatdosh topish\" yoki /keyingi tugmasini bosing.";
 
-    public const string SearchStopped = "⏹️ Qidirish to'xtatildi.\n\n" +
-        "Yangi suhbatni boshlash uchun \"🔍 Topish\" tugmasini bosing.";
+    public const string SearchStopped = "⏹️ Qidiruv to'xtatildi.";
 
-    public const string AlreadyInChat = "❌ Siz allaqachon suhbatdasiz!\n\n" +
-        "Suhbatni tugatish uchun \"❌ Tugatish\" tugmasini bosing.";
+    public const string AlreadyInChat = "💬 Siz allaqachon suhbatdasiz!";
 
-    public const string NotInChat = "❌ Siz hozir suhbatda emasiz.\n\n" +
-        "Yangi suhbatni boshlash uchun \"🔍 Topish\" tugmasini bosing.";
+    public const string NotInChat = "❌ Hozir suhbatda emasiz.";
 
-    public const string PartnerLeft = "⚠️ Suhbat sherik ketdi.\n\n" +
-        "Yangi suhbatni boshlash uchun \"🔍 Topish\" tugmasini bosing.";
+    public const string PartnerLeft = "💔 Suhbatdosh ketdi.\n\n" +
+        "Yangi suhbat uchun \"🔍 Suhbatdosh topish\" yoki /keyingi tugmasini bosing.";
 
-    public const string NotRegistered = "❌ Avval ro'yxatdan o'tishingiz kerak.\n\n" +
+    public const string NotRegistered = "❌ Avval ro'yxatdan o'tish kerak.\n\n" +
         "/start buyrug'ini ishlating.";
 
-    public const string Error = "❌ Xatolik yuz berdi. Iltimos qayta urinib ko'ring.";
+    public const string Error = "❌ Xatolik! Qayta urinib ko'ring.";
 
-    public static string MainMenu => "Asosiy menyu: Hamkor topish, Profil, Chatni to'xtatish.";
+    public static string MainMenu => "📱 Menyu:\n\n" +
+    "Buyruqlar:\n" +
+    "/keyingi - Yangi suhbat\n" +
+    "/stop - Chiqish\n\n" +
+    "Tugmalar:\n" +
+    "🔍 Suhbatdosh topish\n" +
+    "⏹️ Tugatish\n" +
+    "👤 Profil";
 }

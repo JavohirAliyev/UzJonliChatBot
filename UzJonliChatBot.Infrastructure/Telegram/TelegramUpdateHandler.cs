@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -14,20 +15,14 @@ namespace UzJonliChatBot.Infrastructure.Telegram;
 /// </summary>
 public class TelegramUpdateHandler
 {
-    private readonly IRegistrationService _registrationService;
-    private readonly IMatchmakingService _matchmakingService;
-    private readonly IChatService _chatService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ITelegramBotClient _botClient;
 
     public TelegramUpdateHandler(
-        IRegistrationService registrationService,
-        IMatchmakingService matchmakingService,
-        IChatService chatService,
+        IServiceProvider serviceProvider,
         ITelegramBotClient botClient)
     {
-        _registrationService = registrationService;
-        _matchmakingService = matchmakingService;
-        _chatService = chatService;
+        _serviceProvider = serviceProvider;
         _botClient = botClient;
     }
 
@@ -38,13 +33,16 @@ public class TelegramUpdateHandler
     {
         try
         {
+            // Create a scope for this update to resolve scoped services
+            using var scope = _serviceProvider.CreateScope();
+            
             if (update.Message?.Type == MessageType.Text)
             {
-                await HandleMessageAsync(update.Message);
+                await HandleMessageAsync(update.Message, scope);
             }
             else if (update.CallbackQuery != null)
             {
-                await HandleCallbackQueryAsync(update.CallbackQuery);
+                await HandleCallbackQueryAsync(update.CallbackQuery, scope);
             }
         }
         catch (Exception ex)
@@ -56,38 +54,43 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles text messages and commands.
     /// </summary>
-    private async Task HandleMessageAsync(Message message)
+    private async Task HandleMessageAsync(Message message, IServiceScope scope)
     {
+        var registrationService = scope.ServiceProvider.GetRequiredService<IRegistrationService>();
+        var matchmakingService = scope.ServiceProvider.GetRequiredService<IMatchmakingService>();
+        var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+
         var userId = message.Chat.Id;
         var text = message.Text ?? string.Empty;
 
         if (text.StartsWith("/start"))
         {
-            await HandleStartAsync(userId);
+            await HandleStartAsync(userId, registrationService, scope);
         }
         else if (text.StartsWith("/keyingi") || text == BotMessages.MenuButtonFindPartner)
         {
-            await HandleNextAsync(userId);
+            await HandleNextAsync(userId, registrationService, matchmakingService, chatService);
         }
         else if (text.StartsWith("/stop") || text == BotMessages.MenuButtonStopChat)
         {
-            await HandleStopAsync(userId);
+            await HandleStopAsync(userId, chatService, matchmakingService);
         }
         else if (text == BotMessages.MenuButtonProfile)
         {
-            await HandleProfileAsync(userId);
+            await HandleProfileAsync(userId, registrationService);
         }
         else
         {
-            await HandleChatMessageAsync(userId, text);
+            await HandleChatMessageAsync(userId, text, registrationService, chatService);
         }
     }
 
     /// <summary>
     /// Handles callback queries from buttons.
     /// </summary>
-    private async Task HandleCallbackQueryAsync(CallbackQuery callbackQuery)
+    private async Task HandleCallbackQueryAsync(CallbackQuery callbackQuery, IServiceScope scope)
     {
+        var registrationService = scope.ServiceProvider.GetRequiredService<IRegistrationService>();
         var userId = callbackQuery.From.Id;
         var data = callbackQuery.Data ?? string.Empty;
         var callbackId = callbackQuery.Id;
@@ -96,11 +99,11 @@ public class TelegramUpdateHandler
         {
             if (data.StartsWith("gender_"))
             {
-                await HandleGenderSelectionAsync(userId, data, callbackId);
+                await HandleGenderSelectionAsync(userId, data, callbackId, registrationService);
             }
             else if (data == "age_verified")
             {
-                await HandleAgeVerificationAsync(userId, callbackId);
+                await HandleAgeVerificationAsync(userId, callbackId, registrationService);
             }
         }
         catch (Exception ex)
@@ -113,9 +116,9 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles /start command - begins registration flow.
     /// </summary>
-    private async Task HandleStartAsync(long userId)
+    private async Task HandleStartAsync(long userId, IRegistrationService registrationService, IServiceScope scope)
     {
-        var status = _registrationService.GetRegistrationStatus(userId);
+        var status = registrationService.GetRegistrationStatus(userId);
 
         if (status == UserRegistrationStatus.Registered)
         {
@@ -139,10 +142,10 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles gender selection from buttons.
     /// </summary>
-    private async Task HandleGenderSelectionAsync(long userId, string data, string callbackId)
+    private async Task HandleGenderSelectionAsync(long userId, string data, string callbackId, IRegistrationService registrationService)
     {
         var gender = data == "gender_male" ? Gender.Male : Gender.Female;
-        _registrationService.SetGender(userId, gender);
+        registrationService.SetGender(userId, gender);
 
         // Show age verification prompt
         var keyboard = new InlineKeyboardMarkup(new[]
@@ -160,9 +163,9 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles age verification confirmation.
     /// </summary>
-    private async Task HandleAgeVerificationAsync(long userId, string callbackId)
+    private async Task HandleAgeVerificationAsync(long userId, string callbackId, IRegistrationService registrationService)
     {
-        _registrationService.ConfirmAge(userId);
+        registrationService.ConfirmAge(userId);
         await _botClient.SendMessage(userId, BotMessages.RegistrationComplete, replyMarkup: GetMainKeyboard());
         await _botClient.AnswerCallbackQuery(callbackId);
     }
@@ -170,36 +173,36 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles /keyingi command - starts searching for a chat partner.
     /// </summary>
-    private async Task HandleNextAsync(long userId)
+    private async Task HandleNextAsync(long userId, IRegistrationService registrationService, IMatchmakingService matchmakingService, IChatService chatService)
     {
         // Check if user is registered
-        if (!_registrationService.IsRegistered(userId))
+        if (!registrationService.IsRegistered(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.NotRegistered);
             return;
         }
 
         // Check if user is already in a chat
-        if (_chatService.IsInChat(userId))
+        if (chatService.IsInChat(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.AlreadyInChat);
             return;
         }
 
         // Check if user is already waiting
-        if (_matchmakingService.IsWaiting(userId))
+        if (matchmakingService.IsWaiting(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.WaitingForPartner);
             return;
         }
 
         // Try to find a partner
-        var partner = _matchmakingService.DequeueUser();
+        var partner = matchmakingService.DequeueUser();
 
         if (partner.HasValue)
         {
             // Found a partner - create chat
-            _chatService.CreateChat(userId, partner.Value);
+            chatService.CreateChat(userId, partner.Value);
             
             var replyMarkup = new ReplyKeyboardRemove();
             await _botClient.SendMessage(userId, BotMessages.FoundPartner, replyMarkup: replyMarkup);
@@ -208,7 +211,7 @@ public class TelegramUpdateHandler
         else
         {
             // No partner available - add to queue
-            _matchmakingService.EnqueueUser(userId);
+            matchmakingService.EnqueueUser(userId);
             await _botClient.SendMessage(userId, BotMessages.WaitingForPartner);
         }
     }
@@ -216,15 +219,15 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles /stop command - ends the current chat or stops the search.
     /// </summary>
-    private async Task HandleStopAsync(long userId)
+    private async Task HandleStopAsync(long userId, IChatService chatService, IMatchmakingService matchmakingService)
     {
         var replyMarkup = GetMainKeyboard();
 
         // Check if user is in an active chat
-        if (_chatService.IsInChat(userId))
+        if (chatService.IsInChat(userId))
         {
-            var partnerId = _chatService.GetPartner(userId);
-            _chatService.EndChat(userId);
+            var partnerId = chatService.GetPartner(userId);
+            chatService.EndChat(userId);
 
             await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: replyMarkup);
             
@@ -236,9 +239,9 @@ public class TelegramUpdateHandler
         }
 
         // Check if user is waiting in the matchmaking queue
-        if (_matchmakingService.IsWaiting(userId))
+        if (matchmakingService.IsWaiting(userId))
         {
-            _matchmakingService.RemoveFromQueue(userId);
+            matchmakingService.RemoveFromQueue(userId);
             await _botClient.SendMessage(userId, BotMessages.SearchStopped, replyMarkup: replyMarkup);
             return;
         }
@@ -250,22 +253,22 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles regular messages - forwards to chat partner.
     /// </summary>
-    private async Task HandleChatMessageAsync(long userId, string text)
+    private async Task HandleChatMessageAsync(long userId, string text, IRegistrationService registrationService, IChatService chatService)
     {
         // Check registration
-        if (!_registrationService.IsRegistered(userId))
+        if (!registrationService.IsRegistered(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.NotRegistered);
             return;
         }
 
-        if (!_chatService.IsInChat(userId))
+        if (!chatService.IsInChat(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.NotInChat);
             return;
         }
 
-        var partnerId = _chatService.GetPartner(userId);
+        var partnerId = chatService.GetPartner(userId);
         if (!partnerId.HasValue)
         {
             await _botClient.SendMessage(userId, BotMessages.Error);
@@ -311,9 +314,9 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles profile request - shows user information.
     /// </summary>
-    private async Task HandleProfileAsync(long userId)
+    private async Task HandleProfileAsync(long userId, IRegistrationService registrationService)
     {
-        var user = _registrationService.GetUser(userId);
+        var user = registrationService.GetUser(userId);
         if (user == null)
         {
             await _botClient.SendMessage(userId, BotMessages.Error);

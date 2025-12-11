@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "UzJonliChatBot.BotHost": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
