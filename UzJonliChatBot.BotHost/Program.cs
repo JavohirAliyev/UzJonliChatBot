@@ -70,7 +70,7 @@ public class Program
             {
                 var env = context.HostingEnvironment;
 
-                config.SetBasePath(Path.Combine(env.ContentRootPath, env.ApplicationName))
+                config.SetBasePath(env.ContentRootPath)
                     .AddJsonFile("appSettings.json", optional: false, reloadOnChange: true)
                     .AddJsonFile($"appSettings.{env.EnvironmentName}.json", optional: true, reloadOnChange: true)
                     .AddEnvironmentVariables()
