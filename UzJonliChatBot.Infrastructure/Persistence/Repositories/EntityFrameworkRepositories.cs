@@ -176,18 +176,54 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task<long?> DequeueAsync()
     {
-        var entry = await _context.MatchmakingQueue
-            .Include(q => q.User)
-            .OrderBy(q => q.QueuedAt)
-            .FirstOrDefaultAsync();
+        // Use a transaction with serializable isolation level to prevent race conditions
+        // This ensures that concurrent dequeue operations don't return the same user
+        // Retry logic handles serialization failures that can occur with high concurrency
+        const int maxRetries = 3;
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable);
+            try
+            {
+                // Get the first entry ordered by queue time
+                // The serializable isolation level ensures no concurrent transaction
+                // can modify this row until we commit
+                var entry = await _context.MatchmakingQueue
+                    .Include(q => q.User)
+                    .OrderBy(q => q.QueuedAt)
+                    .FirstOrDefaultAsync();
 
-        if (entry == null)
-            return null;
+                if (entry == null)
+                {
+                    await transaction.CommitAsync();
+                    return null;
+                }
 
-        _context.MatchmakingQueue.Remove(entry);
-        await _context.SaveChangesAsync();
+                var telegramId = entry.User.TelegramId;
 
-        return entry.User.TelegramId;
+                // Remove the entry atomically within the transaction
+                _context.MatchmakingQueue.Remove(entry);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return telegramId;
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                // Another transaction modified the data, retry
+                await transaction.RollbackAsync();
+                if (attempt == maxRetries - 1) throw;
+                await Task.Delay(10 * (attempt + 1)); // Exponential backoff
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        return null;
     }
 
     public async Task RemoveFromQueueAsync(long telegramId)

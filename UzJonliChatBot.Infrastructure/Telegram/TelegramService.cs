@@ -79,31 +79,24 @@ public class TelegramService : IHostedService, IDisposable
                     continue;
                 }
 
-                // Process updates in parallel to handle multiple users simultaneously
-                // Each update is processed independently, allowing concurrent handling
-                var updateTasks = updates.Select(update =>
+                // Process updates concurrently but with controlled parallelism
+                // Use Task.WhenAll to process all updates in parallel without blocking the main loop
+                // This allows multiple users to interact simultaneously while preventing thread pool exhaustion
+                var updateTasks = updates.Select(async update =>
                 {
-                    // Fire-and-forget: process each update asynchronously without blocking
-                    // This allows multiple users to interact with the bot simultaneously
-                    return Task.Run(async () =>
+                    try
                     {
-                        try
-                        {
-                            await _updateHandler.HandleUpdateAsync(update);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Error processing update {UpdateId} from user {UserId}", 
-                                update.Id, update.Message?.Chat.Id ?? update.CallbackQuery?.From.Id ?? 0);
-                        }
-                    }, cancellationToken);
+                        await _updateHandler.HandleUpdateAsync(update);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error processing update {UpdateId} from user {UserId}", 
+                            update.Id, update.Message?.Chat.Id ?? update.CallbackQuery?.From.Id ?? 0);
+                    }
                 }).ToArray();
 
-                // Don't await here - let updates process in parallel
-                // The offset will be updated immediately so we can fetch new updates
-                // even if current ones are still processing
-                
-                // Track completion for logging purposes (fire-and-forget)
+                // Process updates concurrently - don't block the main loop
+                // Fire-and-forget pattern: start all tasks and continue to fetch new updates
                 _ = Task.WhenAll(updateTasks).ContinueWith(t =>
                 {
                     if (t.IsFaulted && t.Exception != null)

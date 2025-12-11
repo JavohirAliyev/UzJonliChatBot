@@ -100,7 +100,19 @@ public class Program
                 }
 
                 services.AddDbContext<ChatBotDbContext>(options =>
-                    options.UseNpgsql(connectionString));
+                    options.UseNpgsql(connectionString, npgsqlOptions =>
+                    {
+                        // Enable retry logic for transient failures (common in Azure)
+                        npgsqlOptions.EnableRetryOnFailure(
+                            maxRetryCount: 3,
+                            maxRetryDelay: TimeSpan.FromSeconds(5),
+                            errorCodesToAdd: null);
+                        
+                        // Set command timeout to prevent hanging operations
+                        npgsqlOptions.CommandTimeout(30); // 30 seconds
+                    })
+                    .EnableSensitiveDataLogging(false)
+                    .EnableDetailedErrors(false));
 
                 tempLogger.LogInformation("Registered ChatBotDbContext with Npgsql.");
 
