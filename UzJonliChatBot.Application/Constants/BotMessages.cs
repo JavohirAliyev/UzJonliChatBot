@@ -30,7 +30,8 @@ public static class BotMessages
 
     // Chat Messages
     public const string FoundPartner = "🎉 Suhbatdosh topildi!\n\n" +
-        "Suhbatni boshlang 👇";
+        "Suhbatni boshlang 👇\n\n" +
+        "Suhbatni tugatish uchun /stop tugmasini bosing.";
 
     public const string WaitingForPartner = "⏳ Suhbatdosh qidirilmoqda...\n\n" +
         "Iltimos kuting 😊";
@@ -51,13 +52,4 @@ public static class BotMessages
         "/start buyrug'ini ishlating.";
 
     public const string Error = "❌ Xatolik! Qayta urinib ko'ring.";
-
-    public static string MainMenu => "📱 Menyu:\n\n" +
-    "Buyruqlar:\n" +
-    "/keyingi - Yangi suhbat\n" +
-    "/stop - Chiqish\n\n" +
-    "Tugmalar:\n" +
-    "🔍 Suhbatdosh topish\n" +
-    "⏹️ Tugatish\n" +
-    "👤 Profil";
 }

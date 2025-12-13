@@ -127,7 +127,7 @@ public class TelegramUpdateHandler
 
         if (status == UserRegistrationStatus.Registered)
         {
-            await HandleMenuAsync(userId);
+            await HandleStartAsync(userId);
             return;
         }
 
@@ -337,10 +337,10 @@ public class TelegramUpdateHandler
     }
 
     /// <summary>
-    /// Shows the main menu to the user.
+    /// Handles /start command - shows welcome message.
     /// </summary>
-    private async Task HandleMenuAsync(long userId)
+    private async Task HandleStartAsync(long userId)
     {
-        await _botClient.SendMessage(userId, BotMessages.MainMenu, replyMarkup: GetMainKeyboard());
+        await _botClient.SendMessage(userId, BotMessages.Welcome, replyMarkup: GetMainKeyboard());
     }
 }
