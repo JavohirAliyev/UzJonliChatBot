@@ -88,20 +88,41 @@ public class ChatRepository : IChatRepository
         _context = context;
     }
 
-    public async Task<Chat?> GetActiveChatAsync(long userId)
+    public async Task<Chat?> GetActiveChatAsync(long telegramId)
     {
+        // Convert Telegram ID to database User ID
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
+
+        if (user == null)
+            return null;
+
+        // Query using database User ID
         var entity = await _context.ActiveChats
-            .FirstOrDefaultAsync(c => c.User1Id == userId || c.User2Id == userId);
+            .Include(c => c.User1)
+            .Include(c => c.User2)
+            .FirstOrDefaultAsync(c => c.User1Id == user.Id || c.User2Id == user.Id);
 
         return entity == null ? null : MapToModel(entity);
     }
 
     public async Task AddAsync(Chat chat)
     {
+        // chat.User1Id and chat.User2Id are Telegram IDs - convert to database User IDs
+        var user1 = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == chat.User1Id);
+        var user2 = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == chat.User2Id);
+
+        if (user1 == null)
+            throw new InvalidOperationException($"User with Telegram ID {chat.User1Id} does not exist. User must be registered first.");
+        if (user2 == null)
+            throw new InvalidOperationException($"User with Telegram ID {chat.User2Id} does not exist. User must be registered first.");
+
         var entity = new ActiveChatEntity
         {
-            User1Id = chat.User1Id,
-            User2Id = chat.User2Id,
+            User1Id = user1.Id,
+            User2Id = user2.Id,
             StartedAt = chat.StartedAt
         };
 
@@ -111,8 +132,17 @@ public class ChatRepository : IChatRepository
 
     public async Task RemoveAsync(Chat chat)
     {
+        // chat.User1Id and chat.User2Id are Telegram IDs - convert to database User IDs
+        var user1 = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == chat.User1Id);
+        var user2 = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == chat.User2Id);
+
+        if (user1 == null || user2 == null)
+            return;
+
         var entity = await _context.ActiveChats
-            .FirstOrDefaultAsync(c => c.User1Id == chat.User1Id && c.User2Id == chat.User2Id);
+            .FirstOrDefaultAsync(c => c.User1Id == user1.Id && c.User2Id == user2.Id);
 
         if (entity != null)
         {
@@ -121,19 +151,28 @@ public class ChatRepository : IChatRepository
         }
     }
 
-    public async Task<bool> IsInChatAsync(long userId)
+    public async Task<bool> IsInChatAsync(long telegramId)
     {
+        // Convert Telegram ID to database User ID
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
+
+        if (user == null)
+            return false;
+
+        // Query using database User ID
         return await _context.ActiveChats
-            .AnyAsync(c => c.User1Id == userId || c.User2Id == userId);
+            .AnyAsync(c => c.User1Id == user.Id || c.User2Id == user.Id);
     }
 
     private static Chat MapToModel(ActiveChatEntity entity)
     {
+        // Convert database User IDs back to Telegram IDs
         return new Chat
         {
             Id = entity.Id,
-            User1Id = entity.User1Id,
-            User2Id = entity.User2Id,
+            User1Id = entity.User1.TelegramId,
+            User2Id = entity.User2.TelegramId,
             StartedAt = entity.StartedAt
         };
     }
