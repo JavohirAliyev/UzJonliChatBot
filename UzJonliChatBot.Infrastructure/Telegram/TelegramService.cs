@@ -99,8 +99,17 @@ public class TelegramService : IHostedService, IDisposable
                 }
             }
 
+            // Telegram API expects update type names like "message" and "callback_query" (note the underscore).
+            // Using Enum.ToString().ToLowerInvariant() yields "callbackquery" which Telegram will ignore.
+            // Build the allowed_updates array with correct API names.
             var allowedUpdates = new[] { UpdateType.Message, UpdateType.CallbackQuery };
-            var allowedUpdatesArray = allowedUpdates.Select(u => u.ToString().ToLowerInvariant()).ToArray();
+            var allowedUpdatesArray = allowedUpdates
+                .Select(u => u switch
+                {
+                    UpdateType.CallbackQuery => "callback_query",
+                    _ => u.ToString().ToLowerInvariant()
+                })
+                .ToArray();
             
             // Get bot token
             var botToken = _configuration.GetSection("TelegramBot:Token").Value
