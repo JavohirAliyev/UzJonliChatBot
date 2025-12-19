@@ -73,17 +73,17 @@ public class TelegramService : IHostedService, IDisposable
             
             if (string.IsNullOrWhiteSpace(webhookUrl))
             {
-                // Try to construct from environment (common in Azure)
+                // Try to construct from environment variables
                 var baseUrl = Environment.GetEnvironmentVariable("WEBSITE_HOSTNAME") 
                     ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")?.Split(';').FirstOrDefault()?.Replace("http://", "").Replace("https://", "");
                 
                 if (!string.IsNullOrWhiteSpace(baseUrl))
                 {
-                    // Determine if HTTPS should be used (Azure Web Apps use HTTPS by default)
+                    // Determine if HTTPS should be used (use HTTPS for non-localhost addresses)
                     var useHttps = !baseUrl.Contains("localhost") && !baseUrl.Contains("127.0.0.1");
                     var protocol = useHttps ? "https" : "http";
                     
-                    // Remove port if present (Azure handles this)
+                    // Remove port if present
                     if (baseUrl.Contains(':'))
                     {
                         baseUrl = baseUrl.Split(':')[0];

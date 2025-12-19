@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using Telegram.Bot.Types;
 using UzJonliChatBot.Application.Interfaces;
@@ -15,7 +15,9 @@ public class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        var logger = builder.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
+        // Use LoggerFactory directly instead of BuildServiceProvider to avoid duplicate service instances
+        using var loggerFactory = LoggerFactory.Create(loggingBuilder => loggingBuilder.AddConsole());
+        var logger = loggerFactory.CreateLogger<Program>();
         logger.LogInformation("Building application...");
 
         ConfigureServices(builder.Services, builder.Configuration, builder.Environment);
@@ -105,10 +107,10 @@ public class Program
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         tempLogger.LogInformation("GetConnectionString returned: HasValue={HasValue}, Length={Length}", !string.IsNullOrWhiteSpace(connectionString), connectionString?.Length ?? 0);
 
-                // Also check environment-override commonly used in containers and Azure
-                if (string.IsNullOrWhiteSpace(connectionString))
-                {
-                    connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection");
+        // Also check environment-override commonly used in containers
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection");
             tempLogger.LogInformation("Falling back to env var ConnectionStrings__DefaultConnection: HasValue={HasValue}", !string.IsNullOrWhiteSpace(connectionString));
         }
 
@@ -116,13 +118,17 @@ public class Program
         {
             // As a last resort dump available configuration keys for diagnostics (no values)
             tempLogger.LogCritical("Connection string 'DefaultConnection' not found. Available configuration keys: {Keys}", string.Join(',', configuration.AsEnumerable().Select(kvp => kvp.Key).Take(50)));
-            throw new InvalidOperationException("Connection string 'DefaultConnection' not found. Provide 'ConnectionStrings:DefaultConnection' in configuration or set environment variable 'ConnectionStrings__DefaultConnection' (or Azure connection string named 'DefaultConnection').");
+            throw new InvalidOperationException("Connection string 'DefaultConnection' not found. Provide 'ConnectionStrings:DefaultConnection' in configuration or set environment variable 'ConnectionStrings__DefaultConnection'.");
         }
+
+        // Force IPv4 to avoid IPv6 connection issues (e.g., on Azure App Service)
+        // Supabase connection strings may contain IPv6 addresses which some environments don't support
+        connectionString = ForceIPv4Connection(connectionString);
 
         services.AddDbContext<ChatBotDbContext>(options =>
             options.UseNpgsql(connectionString, npgsqlOptions =>
             {
-                // Enable retry logic for transient failures (common in Azure)
+                // Enable retry logic for transient failures
                 npgsqlOptions.EnableRetryOnFailure(
                     maxRetryCount: 3,
                     maxRetryDelay: TimeSpan.FromSeconds(5),
@@ -158,5 +164,62 @@ public class Program
         // Register hosted services (these will start automatically when host runs)
         services.AddHostedService<TelegramService>();
         tempLogger.LogInformation("Registered hosted services (TelegramService).");
+    }
+
+    /// <summary>
+    /// Forces IPv4 connection by resolving hostname to IPv4 address.
+    /// This is necessary for environments that don't support IPv6 (e.g., Azure App Service).
+    /// Supabase hostnames may resolve to IPv6 addresses which some environments can't connect to.
+    /// </summary>
+    private static string ForceIPv4Connection(string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return connectionString;
+
+        try
+        {
+            // Extract hostname from connection string (format: Host=hostname;Port=5432;...)
+            var hostMatch = System.Text.RegularExpressions.Regex.Match(connectionString, @"Host=([^;]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (hostMatch.Success)
+            {
+                var hostname = hostMatch.Groups[1].Value.Trim();
+                
+                // Skip if it's already an IPv4 address
+                if (System.Net.IPAddress.TryParse(hostname, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    return connectionString;
+                }
+
+                // Skip if it's localhost or 127.0.0.1
+                if (hostname.Equals("localhost", StringComparison.OrdinalIgnoreCase) || 
+                    hostname.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+                {
+                    return connectionString;
+                }
+
+                // Resolve hostname to get IPv4 address
+                var hostEntry = System.Net.Dns.GetHostEntry(hostname);
+                var ipv4Address = hostEntry.AddressList
+                    .FirstOrDefault(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                
+                if (ipv4Address != null)
+                {
+                    // Replace hostname with IPv4 address in connection string
+                    connectionString = System.Text.RegularExpressions.Regex.Replace(
+                        connectionString,
+                        @"Host=([^;]+)",
+                        $"Host={ipv4Address}",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // If DNS resolution fails, log warning but continue with original connection string
+            // This allows the connection to proceed, though it may fail if IPv6 is not supported
+            Console.WriteLine($"Warning: Could not resolve hostname to IPv4: {ex.Message}. Using original connection string.");
+        }
+
+        return connectionString;
     }
 }
