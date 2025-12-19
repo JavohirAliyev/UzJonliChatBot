@@ -161,8 +161,9 @@ public class TelegramUpdateHandler
             }
         });
 
-        await _botClient.SendMessage(userId, BotMessages.AgeVerificationPrompt, replyMarkup: keyboard);
+        // Answer the callback first to stop the client's loading spinner, then send the next message.
         await _botClient.AnswerCallbackQuery(callbackId);
+        await _botClient.SendMessage(userId, BotMessages.AgeVerificationPrompt, replyMarkup: keyboard);
     }
 
     /// <summary>
@@ -171,8 +172,9 @@ public class TelegramUpdateHandler
     private async Task HandleAgeVerificationAsync(long userId, string callbackId, IRegistrationService registrationService)
     {
         registrationService.ConfirmAge(userId);
-        await _botClient.SendMessage(userId, BotMessages.RegistrationComplete, replyMarkup: GetMainKeyboard());
+        // Answer the callback early so the UI doesn't appear to lag, then send the confirmation message.
         await _botClient.AnswerCallbackQuery(callbackId);
+        await _botClient.SendMessage(userId, BotMessages.RegistrationComplete, replyMarkup: GetMainKeyboard());
     }
 
     /// <summary>
