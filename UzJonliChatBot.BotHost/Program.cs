@@ -136,9 +136,8 @@ public class Program
         // Admin API endpoints
         app.MapAdminEndpoints();
 
-        // Admin dashboard routes
+        // Admin dashboard route - redirect root to index.html
         app.MapGet("/admin", () => Results.Redirect("/admin/index.html"));
-        app.MapGet("/admin/", () => Results.Redirect("/admin/index.html"));
 
         logger.LogInformation("Endpoints mapped successfully");
     }

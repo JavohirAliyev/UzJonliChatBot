@@ -49,10 +49,17 @@ public class TelegramService : IHostedService, IDisposable
             // Set up bot commands for dropdown menu
             await SetupCommandsAsync(cancellationToken);
 
-            // Set up webhook
-            await SetupWebhookAsync(cancellationToken);
-            
-            _logger.LogInformation("Telegram bot service started successfully with webhook.");
+            // Set up webhook (don't throw if it fails - allow app to start)
+            try
+            {
+                await SetupWebhookAsync(cancellationToken);
+                _logger.LogInformation("Telegram bot service started successfully with webhook.");
+            }
+            catch (Exception webhookEx)
+            {
+                _logger.LogWarning(webhookEx, "Webhook setup failed. Bot will not receive updates. Configure TelegramBot:WebhookUrl or WEBSITE_HOSTNAME environment variable.");
+                _logger.LogInformation("Telegram bot service started without webhook (admin dashboard will still work).");
+            }
         }
         catch (Exception ex)
         {

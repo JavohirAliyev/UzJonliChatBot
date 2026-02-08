@@ -12,7 +12,7 @@ using UzJonliChatBot.Infrastructure.Persistence;
 namespace UzJonliChatBot.Infrastructure.Migrations
 {
     [DbContext(typeof(ChatBotDbContext))]
-    [Migration("20260208122851_AddAdminAndBanSupport")]
+    [Migration("20260208123830_AddAdminAndBanSupport")]
     partial class AddAdminAndBanSupport
     {
         /// <inheritdoc />
