@@ -490,7 +490,13 @@ public class TelegramUpdateHandler
             $"Jins: {genderText}\n" +
             $"Ro'yxatga olindi: {uzbekistanTime:dd.MM.yyyy HH:mm}";
 
-        // Add inline keyboard for gender change
+        // Get the appropriate reply keyboard based on user state
+        var replyKeyboard = await GetKeyboardAsync(userId, chatService, matchmakingService);
+
+        // Send profile with reply keyboard
+        await _botClient.SendMessage(userId, profileMessage, replyMarkup: replyKeyboard);
+
+        // Send inline keyboard for gender change in a separate message
         var inlineKeyboard = new InlineKeyboardMarkup(new[]
         {
             new[]
@@ -498,12 +504,6 @@ public class TelegramUpdateHandler
                 InlineKeyboardButton.WithCallbackData("🔄 Jinsni o'zgartirish", "change_gender")
             }
         });
-
-        // Get the appropriate reply keyboard based on user state
-        var replyKeyboard = await GetKeyboardAsync(userId, chatService, matchmakingService);
-
-        await _botClient.SendMessage(userId, profileMessage, replyMarkup: inlineKeyboard);
-        await _botClient.SendMessage(userId, "Menu:", replyMarkup: replyKeyboard);
     }
 
     /// <summary>
