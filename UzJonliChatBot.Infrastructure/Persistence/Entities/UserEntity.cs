@@ -1,6 +1,18 @@
 namespace UzJonliChatBot.Infrastructure.Persistence.Entities;
 
 /// <summary>
+/// Admin entity for database storage.
+/// </summary>
+public class AdminEntity
+{
+    public int Id { get; set; }
+    public string Username { get; set; } = null!;
+    public string PasswordHash { get; set; } = null!;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? LastLoginAt { get; set; }
+}
+
+/// <summary>
 /// User entity for database storage.
 /// </summary>
 public class UserEntity
@@ -10,6 +22,7 @@ public class UserEntity
     public string Gender { get; set; } = null!;
     public bool IsAgeVerified { get; set; }
     public string RegistrationStatus { get; set; } = null!;
+    public bool IsBanned { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 

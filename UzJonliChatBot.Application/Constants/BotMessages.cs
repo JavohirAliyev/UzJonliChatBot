@@ -51,5 +51,8 @@ public static class BotMessages
     public const string NotRegistered = "❌ Avval ro'yxatdan o'tish kerak.\n\n" +
         "/start buyrug'ini ishlating.";
 
+    public const string UserBanned = "🚫 Sizning hisobingiz bloklangan.\n\n" +
+        "Ma'lumot uchun administrator bilan bog'laning.";
+
     public const string Error = "❌ Xatolik! Qayta urinib ko'ring.";
 }

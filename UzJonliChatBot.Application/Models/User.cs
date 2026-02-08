@@ -30,6 +30,7 @@ public class User
     public Gender? Gender { get; set; }
     public bool IsAgeVerified { get; set; }
     public UserRegistrationStatus RegistrationStatus { get; set; }
+    public bool IsBanned { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 
@@ -37,6 +38,7 @@ public class User
     {
         RegistrationStatus = UserRegistrationStatus.NotStarted;
         IsAgeVerified = false;
+        IsBanned = false;
         CreatedAt = DateTime.UtcNow;
     }
 }

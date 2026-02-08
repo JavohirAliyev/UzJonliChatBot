@@ -1,10 +1,10 @@
-using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using Microsoft.Extensions.FileProviders;
 using Telegram.Bot.Types;
 using UzJonliChatBot.Application.Interfaces;
-using UzJonliChatBot.Application.Services;
+using UzJonliChatBot.BotHost.Api;
+using UzJonliChatBot.BotHost.Configuration;
 using UzJonliChatBot.Infrastructure.Persistence;
-using UzJonliChatBot.Infrastructure.Persistence.Repositories;
 using UzJonliChatBot.Infrastructure.Telegram;
 
 namespace UzJonliChatBot.BotHost;
@@ -15,46 +15,81 @@ public class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        // Use LoggerFactory directly instead of BuildServiceProvider to avoid duplicate service instances
+        // Setup logging
         using var loggerFactory = LoggerFactory.Create(loggingBuilder => loggingBuilder.AddConsole());
         var logger = loggerFactory.CreateLogger<Program>();
         logger.LogInformation("Building application...");
 
-        ConfigureServices(builder.Services, builder.Configuration, builder.Environment);
+        // Configure services
+        builder.Services.AddApplicationServices(builder.Configuration, logger);
+        builder.Services.AddJwtAuthentication(builder.Configuration);
 
         var app = builder.Build();
 
         logger = app.Services.GetRequiredService<ILogger<Program>>();
         logger.LogInformation("Application built. Initializing database...");
 
-        // Initialize database before starting hosted services
-        using (var scope = app.Services.CreateScope())
-        {
-            try
-            {
-                logger.LogInformation("Starting database initialization...");
-                var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
-                await DatabaseInitializationService.InitializeAsync(dbContext);
-                logger.LogInformation("Database initialization completed successfully.");
-            }
-            catch (Exception ex)
-            {
-                logger.LogCritical(ex, "Database initialization failed.");
-                throw;
-            }
-        }
+        // Initialize database
+        await InitializeDatabaseAsync(app, logger);
 
-        // Configure webhook endpoint
-        app.MapPost("/webhook", async (HttpContext context, TelegramUpdateHandler updateHandler, ILogger<Program> logger) =>
+        // Configure middleware pipeline
+        ConfigureMiddleware(app);
+
+        // Map endpoints
+        MapEndpoints(app, logger);
+
+        logger.LogInformation("Starting web application...");
+        await app.RunAsync();
+    }
+
+    private static async Task InitializeDatabaseAsync(WebApplication app, ILogger logger)
+    {
+        using var scope = app.Services.CreateScope();
+        try
+        {
+            logger.LogInformation("Starting database initialization...");
+            var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
+            var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            await DatabaseInitializationService.InitializeAsync(dbContext, configuration);
+            logger.LogInformation("Database initialization completed successfully");
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Database initialization failed");
+            throw;
+        }
+    }
+
+    private static void ConfigureMiddleware(WebApplication app)
+    {
+        // Enable static files for admin dashboard
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            FileProvider = new PhysicalFileProvider(
+                Path.Combine(app.Environment.ContentRootPath, "wwwroot")),
+            RequestPath = ""
+        });
+
+        // Authentication & Authorization
+        app.UseAuthenticationAndAuthorization();
+    }
+
+    private static void MapEndpoints(WebApplication app, ILogger logger)
+    {
+        // Webhook endpoint for Telegram bot
+        app.MapPost("/webhook", async (
+            HttpContext context,
+            TelegramUpdateHandler updateHandler,
+            ILogger<Program> webhookLogger) =>
         {
             try
             {
                 using var reader = new StreamReader(context.Request.Body);
                 var body = await reader.ReadToEndAsync();
-                
+
                 if (string.IsNullOrEmpty(body))
                 {
-                    logger.LogWarning("Received empty webhook request");
+                    webhookLogger.LogWarning("Received empty webhook request");
                     return Results.BadRequest("Empty request body");
                 }
 
@@ -65,11 +100,11 @@ public class Program
 
                 if (update == null)
                 {
-                    logger.LogWarning("Failed to deserialize webhook update");
+                    webhookLogger.LogWarning("Failed to deserialize webhook update");
                     return Results.BadRequest("Invalid update format");
                 }
 
-                // Process update asynchronously (fire and forget to respond quickly to Telegram)
+                // Process update asynchronously
                 _ = Task.Run(async () =>
                 {
                     try
@@ -78,7 +113,7 @@ public class Program
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Error processing webhook update {UpdateId}", update.Id);
+                        webhookLogger.LogError(ex, "Error processing webhook update {UpdateId}", update.Id);
                     }
                 });
 
@@ -86,84 +121,25 @@ public class Program
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error handling webhook request");
+                webhookLogger.LogError(ex, "Error handling webhook request");
                 return Results.StatusCode(500);
             }
         });
 
         // Health check endpoint
-        app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
-
-        logger.LogInformation("Starting web application...");
-        await app.RunAsync();
-    }
-
-    private static void ConfigureServices(IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
-    {
-        var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-        var tempLogger = loggerFactory.CreateLogger("Startup");
-
-        // Register DbContext
-        var connectionString = configuration.GetConnectionString("DefaultConnection");
-        tempLogger.LogInformation("GetConnectionString returned: HasValue={HasValue}, Length={Length}", !string.IsNullOrWhiteSpace(connectionString), connectionString?.Length ?? 0);
-
-        // Also check environment-override commonly used in containers
-        if (string.IsNullOrWhiteSpace(connectionString))
+        app.MapGet("/health", () => Results.Ok(new
         {
-            connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection");
-            tempLogger.LogInformation("Falling back to env var ConnectionStrings__DefaultConnection: HasValue={HasValue}", !string.IsNullOrWhiteSpace(connectionString));
-        }
+            status = "healthy",
+            timestamp = DateTime.UtcNow
+        }));
 
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            // As a last resort dump available configuration keys for diagnostics (no values)
-            tempLogger.LogCritical("Connection string 'DefaultConnection' not found. Available configuration keys: {Keys}", string.Join(',', configuration.AsEnumerable().Select(kvp => kvp.Key).Take(50)));
-            throw new InvalidOperationException("Connection string 'DefaultConnection' not found. Provide 'ConnectionStrings:DefaultConnection' in configuration or set environment variable 'ConnectionStrings__DefaultConnection'.");
-        }
+        // Admin API endpoints
+        app.MapAdminEndpoints();
 
-        // Note: Use Supabase Session Pooler connection string (port 6543) for better connection management.
-        // Session Pooler handles connection pooling and prevents connection exhaustion.
-        // Connection string format: Host=xxx.supabase.co;Port=6543;Database=postgres;Username=postgres;Password=xxx
-        // Add to connection string: No Reset On Close=true (recommended for Session Pooler)
+        // Admin dashboard routes
+        app.MapGet("/admin", () => Results.Redirect("/admin/index.html"));
+        app.MapGet("/admin/", () => Results.Redirect("/admin/index.html"));
 
-        services.AddDbContext<ChatBotDbContext>(options =>
-            options.UseNpgsql(connectionString, npgsqlOptions =>
-            {
-                // Enable retry logic for transient failures
-                npgsqlOptions.EnableRetryOnFailure(
-                    maxRetryCount: 3,
-                    maxRetryDelay: TimeSpan.FromSeconds(5),
-                    errorCodesToAdd: null);
-                
-                // Set command timeout to prevent hanging operations
-                npgsqlOptions.CommandTimeout(30); // 30 seconds
-            })
-            .EnableSensitiveDataLogging(false)
-            .EnableDetailedErrors(false));
-
-        tempLogger.LogInformation("Registered ChatBotDbContext with Npgsql.");
-
-        // Register repositories as Scoped (they use scoped DbContext)
-        services.AddScoped<IUserRepository, UserRepository>();
-        services.AddScoped<IChatRepository, ChatRepository>();
-        services.AddScoped<IMatchmakingQueueRepository, MatchmakingQueueRepository>();
-        tempLogger.LogInformation("Registered repositories.");
-
-        // Register application services as Scoped (they depend on scoped repositories)
-        services.AddScoped<IUserService, UserService>();
-        services.AddScoped<IRegistrationService, RegistrationService>();
-        services.AddScoped<IMatchmakingService, MatchmakingService>();
-        services.AddScoped<IChatService, ChatService>();
-        tempLogger.LogInformation("Registered application services.");
-
-        // Register infrastructure services
-        var botClient = TelegramBotClientFactory.Create(configuration);
-        services.AddSingleton(botClient);
-        services.AddSingleton<TelegramUpdateHandler>();
-        tempLogger.LogInformation("Registered Telegram infrastructure services.");
-
-        // Register hosted services (these will start automatically when host runs)
-        services.AddHostedService<TelegramService>();
-        tempLogger.LogInformation("Registered hosted services (TelegramService).");
+        logger.LogInformation("Endpoints mapped successfully");
     }
 }

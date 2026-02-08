@@ -26,6 +26,21 @@ public interface IUserRepository
     /// Gets all registered and verified users.
     /// </summary>
     Task<IEnumerable<User>> GetRegisteredUsersAsync();
+
+    /// <summary>
+    /// Gets all users with pagination and optional search.
+    /// </summary>
+    Task<(IEnumerable<User> Users, int TotalCount)> GetAllUsersAsync(int page, int pageSize, string? searchTerm = null);
+
+    /// <summary>
+    /// Bans a user by Telegram ID.
+    /// </summary>
+    Task BanUserAsync(long telegramId);
+
+    /// <summary>
+    /// Unbans a user by Telegram ID.
+    /// </summary>
+    Task UnbanUserAsync(long telegramId);
 }
 
 /// <summary>

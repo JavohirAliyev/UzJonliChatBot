@@ -8,6 +8,7 @@ namespace UzJonliChatBot.Infrastructure.Persistence;
 /// </summary>
 public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbContext(options)
 {
+    public DbSet<AdminEntity> Admins { get; set; } = null!;
     public DbSet<UserEntity> Users { get; set; } = null!;
     public DbSet<ActiveChatEntity> ActiveChats { get; set; } = null!;
     public DbSet<MatchmakingQueueEntity> MatchmakingQueue { get; set; } = null!;
@@ -15,6 +16,18 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Admins table configuration
+        modelBuilder.Entity<AdminEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Username).IsUnique();
+            
+            entity.Property(e => e.Username).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.PasswordHash).IsRequired().HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.LastLoginAt);
+        });
 
         // Users table configuration
         modelBuilder.Entity<UserEntity>(entity =>
@@ -26,6 +39,7 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
             entity.Property(e => e.Gender).IsRequired().HasMaxLength(10);
             entity.Property(e => e.IsAgeVerified).IsRequired();
             entity.Property(e => e.RegistrationStatus).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.IsBanned).IsRequired().HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt);
 

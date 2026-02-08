@@ -43,6 +43,7 @@ public class UserRepository : IUserRepository
         entity.Gender = user.Gender?.ToString() ?? "Unknown";
         entity.IsAgeVerified = user.IsAgeVerified;
         entity.RegistrationStatus = user.RegistrationStatus.ToString();
+        entity.IsBanned = user.IsBanned;
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -62,6 +63,52 @@ public class UserRepository : IUserRepository
         return entities.Select(MapToModel);
     }
 
+    public async Task<(IEnumerable<User> Users, int TotalCount)> GetAllUsersAsync(int page, int pageSize, string? searchTerm = null)
+    {
+        var query = _context.Users.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            query = query.Where(u => u.TelegramId.ToString().Contains(searchTerm));
+        }
+
+        var totalCount = await query.CountAsync();
+
+        var entities = await query
+            .OrderByDescending(u => u.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return (entities.Select(MapToModel), totalCount);
+    }
+
+    public async Task BanUserAsync(long telegramId)
+    {
+        var entity = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
+
+        if (entity != null)
+        {
+            entity.IsBanned = true;
+            entity.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
+    }
+
+    public async Task UnbanUserAsync(long telegramId)
+    {
+        var entity = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
+
+        if (entity != null)
+        {
+            entity.IsBanned = false;
+            entity.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
+    }
+
     private static User MapToModel(UserEntity entity)
     {
         return new User
@@ -70,6 +117,7 @@ public class UserRepository : IUserRepository
             Gender = Enum.Parse<Gender>(entity.Gender, ignoreCase: true),
             IsAgeVerified = entity.IsAgeVerified,
             RegistrationStatus = Enum.Parse<UserRegistrationStatus>(entity.RegistrationStatus),
+            IsBanned = entity.IsBanned,
             CreatedAt = entity.CreatedAt,
             UpdatedAt = entity.UpdatedAt
         };
@@ -287,5 +335,68 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
         return await _context.MatchmakingQueue
             .AnyAsync(q => q.UserId == user.Id);
+    }
+}
+
+/// <summary>
+/// Repository for admin persistence operations using Entity Framework.
+/// </summary>
+public class AdminRepository : IAdminRepository
+{
+    private readonly ChatBotDbContext _context;
+
+    public AdminRepository(ChatBotDbContext context)
+    {
+        _context = context;
+    }
+
+    public async Task<Admin?> GetByUsernameAsync(string username)
+    {
+        var entity = await _context.Admins
+            .FirstOrDefaultAsync(a => a.Username == username);
+
+        return entity == null ? null : MapToModel(entity);
+    }
+
+    public async Task AddAsync(Admin admin)
+    {
+        var entity = new AdminEntity
+        {
+            Username = admin.Username,
+            PasswordHash = admin.PasswordHash,
+            CreatedAt = admin.CreatedAt
+        };
+
+        _context.Admins.Add(entity);
+        await _context.SaveChangesAsync();
+        
+        admin.Id = entity.Id;
+    }
+
+    public async Task UpdateLastLoginAsync(int adminId)
+    {
+        var entity = await _context.Admins.FindAsync(adminId);
+        if (entity != null)
+        {
+            entity.LastLoginAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
+    }
+
+    public async Task<bool> AnyAdminExistsAsync()
+    {
+        return await _context.Admins.AnyAsync();
+    }
+
+    private static Admin MapToModel(AdminEntity entity)
+    {
+        return new Admin
+        {
+            Id = entity.Id,
+            Username = entity.Username,
+            PasswordHash = entity.PasswordHash,
+            CreatedAt = entity.CreatedAt,
+            LastLoginAt = entity.LastLoginAt
+        };
     }
 }

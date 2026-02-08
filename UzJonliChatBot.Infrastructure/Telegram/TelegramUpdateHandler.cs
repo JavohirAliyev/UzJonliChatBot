@@ -64,9 +64,17 @@ public class TelegramUpdateHandler
         var registrationService = scope.ServiceProvider.GetRequiredService<IRegistrationService>();
         var matchmakingService = scope.ServiceProvider.GetRequiredService<IMatchmakingService>();
         var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+        var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
 
         var userId = message.Chat.Id;
         var text = message.Text ?? string.Empty;
+
+        // Check if user is banned
+        if (await IsUserBannedAsync(userId, userRepository))
+        {
+            await _botClient.SendMessage(userId, BotMessages.UserBanned);
+            return;
+        }
 
         if (text.StartsWith("/start"))
         {
@@ -344,5 +352,14 @@ public class TelegramUpdateHandler
     private async Task HandleStartAsync(long userId)
     {
         await _botClient.SendMessage(userId, BotMessages.Welcome, replyMarkup: GetMainKeyboard());
+    }
+
+    /// <summary>
+    /// Checks if a user is banned.
+    /// </summary>
+    private async Task<bool> IsUserBannedAsync(long userId, IUserRepository userRepository)
+    {
+        var user = await userRepository.GetByTelegramIdAsync(userId);
+        return user?.IsBanned ?? false;
     }
 }
