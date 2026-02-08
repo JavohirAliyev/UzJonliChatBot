@@ -15,15 +15,14 @@ public class ChatBotDbContextFactory : IDesignTimeDbContextFactory<ChatBotDbCont
         var basePath = Directory.GetCurrentDirectory();
         
         // Navigate to BotHost directory if running from Infrastructure
-        if (!File.Exists(Path.Combine(basePath, "appSettings.json")))
+        if (!File.Exists(Path.Combine(basePath, "appSettings.Development.json")))
         {
-            basePath = Path.Combine(basePath, "UzJonliChatBot.BotHost");
+            basePath = Path.Combine(basePath, "..", "UzJonliChatBot.BotHost");
         }
 
         var configuration = new ConfigurationBuilder()
             .SetBasePath(basePath)
-            .AddJsonFile("appSettings.json", optional: false, reloadOnChange: false)
-            .AddJsonFile("appSettings.Development.json", optional: true, reloadOnChange: false)
+            .AddJsonFile("appSettings.Development.json", optional: false, reloadOnChange: false)
             .Build();
 
         var connectionString = configuration.GetConnectionString("DefaultConnection");
@@ -31,7 +30,7 @@ public class ChatBotDbContextFactory : IDesignTimeDbContextFactory<ChatBotDbCont
         if (string.IsNullOrEmpty(connectionString))
         {
             throw new InvalidOperationException(
-                "Connection string 'DefaultConnection' not found in appSettings.json. " +
+                "Connection string 'DefaultConnection' not found in appSettings.Development.json. " +
                 "Please ensure your connection string is configured.");
         }
 
