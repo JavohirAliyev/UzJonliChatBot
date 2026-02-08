@@ -40,6 +40,8 @@ public class UserRepository : IUserRepository
             _context.Users.Add(entity);
         }
 
+        entity.FullName = user.FullName;
+        entity.Username = user.Username;
         entity.Gender = user.Gender?.ToString() ?? "Unknown";
         entity.IsAgeVerified = user.IsAgeVerified;
         entity.RegistrationStatus = user.RegistrationStatus.ToString();
@@ -114,6 +116,8 @@ public class UserRepository : IUserRepository
         return new User
         {
             TelegramId = entity.TelegramId,
+            FullName = entity.FullName,
+            Username = entity.Username,
             Gender = Enum.Parse<Gender>(entity.Gender, ignoreCase: true),
             IsAgeVerified = entity.IsAgeVerified,
             RegistrationStatus = Enum.Parse<UserRegistrationStatus>(entity.RegistrationStatus),

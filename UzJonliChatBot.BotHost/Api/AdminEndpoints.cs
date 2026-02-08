@@ -68,6 +68,8 @@ public static class AdminEndpoints
                 users = users.Select(u => new
                 {
                     telegramId = u.TelegramId,
+                    fullName = u.FullName,
+                    username = u.Username,
                     gender = u.Gender?.ToString(),
                     isAgeVerified = u.IsAgeVerified,
                     registrationStatus = u.RegistrationStatus.ToString(),

@@ -118,6 +118,14 @@ public class TelegramUpdateHandler
             {
                 await HandleAgeVerificationAsync(userId, callbackId, registrationService);
             }
+            else if (data == "change_gender")
+            {
+                await HandleChangeGenderRequestAsync(userId, callbackId);
+            }
+            else if (data.StartsWith("update_gender_"))
+            {
+                await HandleGenderUpdateAsync(userId, data, callbackId, registrationService);
+            }
         }
         catch (Exception ex)
         {
@@ -135,8 +143,30 @@ public class TelegramUpdateHandler
 
         if (status == UserRegistrationStatus.Registered)
         {
+            // For existing registered users, update their info if missing
+            var user = registrationService.GetUser(userId);
+            if (user != null && (string.IsNullOrEmpty(user.FullName) || string.IsNullOrEmpty(user.Username)))
+            {
+                await UpdateUserInfoFromTelegramAsync(userId, registrationService);
+            }
+            
             await HandleStartAsync(userId);
             return;
+        }
+
+        // Get user info from Telegram
+        try
+        {
+            var chat = await _botClient.GetChat(userId);
+            var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
+            var username = chat.Username;
+            
+            // Save user info
+            registrationService.SetUserInfo(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not get user info for user {UserId}", userId);
         }
 
         // Send gender selection message with inline buttons
@@ -197,11 +227,18 @@ public class TelegramUpdateHandler
             return;
         }
 
-        // Check if user is already in a chat
+        // If user is already in a chat, stop it first
         if (chatService.IsInChat(userId))
         {
-            await _botClient.SendMessage(userId, BotMessages.AlreadyInChat);
-            return;
+            var partnerId = chatService.GetPartner(userId);
+            chatService.EndChat(userId);
+
+            await _botClient.SendMessage(userId, BotMessages.ChatEnded);
+            
+            if (partnerId.HasValue)
+            {
+                await _botClient.SendMessage(partnerId.Value, BotMessages.PartnerLeft, replyMarkup: GetMainKeyboard());
+            }
         }
 
         // Check if user is already waiting
@@ -338,12 +375,49 @@ public class TelegramUpdateHandler
             return;
         }
 
-        var genderText = user.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
-        var profileMessage = $"👤 Sizning Profilingiz\n\n" +
-            $"Jins: {genderText}\n" +
-            $"Ro'yxatga olindi: {user.CreatedAt:dd.MM.yyyy HH:mm}";
+        // Update user info from Telegram if missing (for existing users)
+        if (string.IsNullOrEmpty(user.FullName) || string.IsNullOrEmpty(user.Username))
+        {
+            await UpdateUserInfoFromTelegramAsync(userId, registrationService);
+            // Refresh user data after update
+            user = registrationService.GetUser(userId);
+            if (user == null)
+            {
+                await _botClient.SendMessage(userId, BotMessages.Error);
+                return;
+            }
+        }
 
-        await _botClient.SendMessage(userId, profileMessage, replyMarkup: GetMainKeyboard());
+        var genderText = user.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
+        
+        // Convert UTC to GMT+5 (Uzbekistan Time)
+        var uzbekistanTime = user.CreatedAt.AddHours(5);
+        
+        var profileMessage = $"👤 Sizning Profilingiz\n\n";
+        
+        if (!string.IsNullOrEmpty(user.FullName))
+        {
+            profileMessage += $"Ism: {user.FullName}\n";
+        }
+        
+        if (!string.IsNullOrEmpty(user.Username))
+        {
+            profileMessage += $"Username: @{user.Username}\n";
+        }
+        
+        profileMessage += $"Jins: {genderText}\n" +
+            $"Ro'yxatga olindi: {uzbekistanTime:dd.MM.yyyy HH:mm}";
+
+        // Add inline keyboard for gender change
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData("🔄 Jinsni o'zgartirish", "change_gender")
+            }
+        });
+
+        await _botClient.SendMessage(userId, profileMessage, replyMarkup: keyboard);
     }
 
     /// <summary>
@@ -361,5 +435,62 @@ public class TelegramUpdateHandler
     {
         var user = await userRepository.GetByTelegramIdAsync(userId);
         return user?.IsBanned ?? false;
+    }
+
+    /// <summary>
+    /// Handles request to change gender.
+    /// </summary>
+    private async Task HandleChangeGenderRequestAsync(long userId, string callbackId)
+    {
+        var keyboard = new InlineKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                InlineKeyboardButton.WithCallbackData(BotMessages.GenderButtonMale, "update_gender_male"),
+                InlineKeyboardButton.WithCallbackData(BotMessages.GenderButtonFemale, "update_gender_female")
+            }
+        });
+
+        await _botClient.AnswerCallbackQuery(callbackId);
+        await _botClient.SendMessage(userId, "Yangi jinsingizni tanlang:", replyMarkup: keyboard);
+    }
+
+    /// <summary>
+    /// Handles gender update from profile.
+    /// </summary>
+    private async Task HandleGenderUpdateAsync(long userId, string data, string callbackId, IRegistrationService registrationService)
+    {
+        var gender = data == "update_gender_male" ? Gender.Male : Gender.Female;
+        registrationService.UpdateGender(userId, gender);
+
+        await _botClient.AnswerCallbackQuery(callbackId, "✅ Jins muvaffaqiyatli o'zgartirildi!");
+        
+        // Show updated profile
+        await HandleProfileAsync(userId, registrationService);
+    }
+
+    /// <summary>
+    /// Updates user info from Telegram API if missing.
+    /// </summary>
+    private async Task UpdateUserInfoFromTelegramAsync(long userId, IRegistrationService registrationService)
+    {
+        try
+        {
+            var chat = await _botClient.GetChat(userId);
+            var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
+            var username = chat.Username;
+            
+            // Only update if we have at least some info
+            if (!string.IsNullOrEmpty(fullName) || !string.IsNullOrEmpty(username))
+            {
+                registrationService.SetUserInfo(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
+                _logger.LogInformation("Updated user info for existing user {UserId}: FullName={FullName}, Username={Username}", 
+                    userId, fullName, username);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not update user info from Telegram for user {UserId}", userId);
+        }
     }
 }

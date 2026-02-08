@@ -36,6 +36,8 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
             entity.HasIndex(e => e.TelegramId).IsUnique();
             
             entity.Property(e => e.TelegramId).IsRequired();
+            entity.Property(e => e.FullName).HasMaxLength(200);
+            entity.Property(e => e.Username).HasMaxLength(100);
             entity.Property(e => e.Gender).IsRequired().HasMaxLength(10);
             entity.Property(e => e.IsAgeVerified).IsRequired();
             entity.Property(e => e.RegistrationStatus).IsRequired().HasMaxLength(50);

@@ -38,6 +38,34 @@ public class RegistrationService : IRegistrationService
         _userRepository.AddOrUpdateAsync(user).Wait();
     }
 
+    public void SetUserInfo(long userId, string? fullName, string? username)
+    {
+        var user = _userRepository.GetByTelegramIdAsync(userId).Result;
+
+        if (user == null)
+        {
+            user = new User { TelegramId = userId };
+        }
+
+        user.FullName = fullName;
+        user.Username = username;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        _userRepository.AddOrUpdateAsync(user).Wait();
+    }
+
+    public void UpdateGender(long userId, Gender gender)
+    {
+        var user = _userRepository.GetByTelegramIdAsync(userId).Result;
+
+        if (user != null)
+        {
+            user.Gender = gender;
+            user.UpdatedAt = DateTime.UtcNow;
+            _userRepository.AddOrUpdateAsync(user).Wait();
+        }
+    }
+
     public void ConfirmAge(long userId)
     {
         var user = _userRepository.GetByTelegramIdAsync(userId).Result;

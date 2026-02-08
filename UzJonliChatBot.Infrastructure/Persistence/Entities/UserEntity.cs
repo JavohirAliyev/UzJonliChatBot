@@ -19,6 +19,8 @@ public class UserEntity
 {
     public long Id { get; set; }
     public long TelegramId { get; set; }
+    public string? FullName { get; set; }
+    public string? Username { get; set; }
     public string Gender { get; set; } = null!;
     public bool IsAgeVerified { get; set; }
     public string RegistrationStatus { get; set; } = null!;

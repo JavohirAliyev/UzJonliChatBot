@@ -27,6 +27,8 @@ public enum UserRegistrationStatus
 public class User
 {
     public long TelegramId { get; set; }
+    public string? FullName { get; set; }
+    public string? Username { get; set; }
     public Gender? Gender { get; set; }
     public bool IsAgeVerified { get; set; }
     public UserRegistrationStatus RegistrationStatus { get; set; }

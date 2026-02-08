@@ -18,6 +18,16 @@ public interface IRegistrationService
     void SetGender(long userId, Gender gender);
 
     /// <summary>
+    /// Sets the user's full name and username.
+    /// </summary>
+    void SetUserInfo(long userId, string? fullName, string? username);
+
+    /// <summary>
+    /// Updates the user's gender.
+    /// </summary>
+    void UpdateGender(long userId, Gender gender);
+
+    /// <summary>
     /// Confirms the user is 18 or older.
     /// </summary>
     void ConfirmAge(long userId);
