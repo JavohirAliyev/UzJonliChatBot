@@ -80,17 +80,17 @@ public class TelegramUpdateHandler
         {
             await HandleStartAsync(userId, registrationService, scope);
         }
-        else if (text.StartsWith("/keyingi") || text == BotMessages.MenuButtonFindPartner)
+        else if (text.StartsWith("/keyingi") || text == BotMessages.MenuButtonFindPartner || text == BotMessages.MenuButtonNextPartner)
         {
             await HandleNextAsync(userId, registrationService, matchmakingService, chatService);
         }
-        else if (text.StartsWith("/stop") || text == BotMessages.MenuButtonStopChat)
+        else if (text.StartsWith("/stop") || text == BotMessages.MenuButtonStopChat || text == BotMessages.MenuButtonStopSearch)
         {
             await HandleStopAsync(userId, chatService, matchmakingService);
         }
         else if (text == BotMessages.MenuButtonProfile)
         {
-            await HandleProfileAsync(userId, registrationService);
+            await HandleProfileAsync(userId, registrationService, chatService, matchmakingService);
         }
         else
         {
@@ -104,6 +104,8 @@ public class TelegramUpdateHandler
     private async Task HandleCallbackQueryAsync(CallbackQuery callbackQuery, IServiceScope scope)
     {
         var registrationService = scope.ServiceProvider.GetRequiredService<IRegistrationService>();
+        var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+        var matchmakingService = scope.ServiceProvider.GetRequiredService<IMatchmakingService>();
         var userId = callbackQuery.From.Id;
         var data = callbackQuery.Data ?? string.Empty;
         var callbackId = callbackQuery.Id;
@@ -124,7 +126,7 @@ public class TelegramUpdateHandler
             }
             else if (data.StartsWith("update_gender_"))
             {
-                await HandleGenderUpdateAsync(userId, data, callbackId, registrationService);
+                await HandleGenderUpdateAsync(userId, data, callbackId, registrationService, chatService, matchmakingService);
             }
         }
         catch (Exception ex)
@@ -143,6 +145,26 @@ public class TelegramUpdateHandler
 
         if (status == UserRegistrationStatus.Registered)
         {
+            // Silently update user info in the background for already registered users
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var chat = await _botClient.GetChat(userId);
+                    var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
+                    var username = chat.Username;
+                    
+                    if (!string.IsNullOrEmpty(fullName) || !string.IsNullOrEmpty(username))
+                    {
+                        registrationService.SetUserInfo(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not update user info for user {UserId}", userId);
+                }
+            });
+            
             await HandleStartAsync(userId);
             return;
         }
@@ -226,18 +248,19 @@ public class TelegramUpdateHandler
             var partnerId = chatService.GetPartner(userId);
             chatService.EndChat(userId);
 
-            await _botClient.SendMessage(userId, BotMessages.ChatEnded);
+            await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetSearchingKeyboard());
             
             if (partnerId.HasValue)
             {
-                await _botClient.SendMessage(partnerId.Value, BotMessages.PartnerLeft, replyMarkup: GetMainKeyboard());
+                var partnerKeyboard = await GetKeyboardAsync(partnerId.Value, chatService, matchmakingService);
+                await _botClient.SendMessage(partnerId.Value, BotMessages.PartnerLeft, replyMarkup: partnerKeyboard);
             }
         }
 
         // Check if user is already waiting
         if (await matchmakingService.IsWaitingAsync(userId))
         {
-            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner);
+            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
             return;
         }
 
@@ -249,15 +272,16 @@ public class TelegramUpdateHandler
             // Found a partner - create chat
             chatService.CreateChat(userId, partner.Value);
             
-            var replyMarkup = new ReplyKeyboardRemove();
-            await _botClient.SendMessage(userId, BotMessages.FoundPartner, replyMarkup: replyMarkup);
-            await _botClient.SendMessage(partner.Value, BotMessages.FoundPartner, replyMarkup: replyMarkup);
+            // Send with in-chat keyboard
+            var inChatKeyboard = GetInChatKeyboard();
+            await _botClient.SendMessage(userId, BotMessages.FoundPartner, replyMarkup: inChatKeyboard);
+            await _botClient.SendMessage(partner.Value, BotMessages.FoundPartner, replyMarkup: inChatKeyboard);
         }
         else
         {
             // No partner available - add to queue
             await matchmakingService.EnqueueUserAsync(userId);
-            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner);
+            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
         }
     }
 
@@ -266,19 +290,18 @@ public class TelegramUpdateHandler
     /// </summary>
     private async Task HandleStopAsync(long userId, IChatService chatService, IMatchmakingService matchmakingService)
     {
-        var replyMarkup = GetMainKeyboard();
-
         // Check if user is in an active chat
         if (chatService.IsInChat(userId))
         {
             var partnerId = chatService.GetPartner(userId);
             chatService.EndChat(userId);
 
-            await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: replyMarkup);
+            await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetIdleKeyboard());
             
             if (partnerId.HasValue)
             {
-                await _botClient.SendMessage(partnerId.Value, BotMessages.PartnerLeft, replyMarkup: replyMarkup);
+                var partnerKeyboard = await GetKeyboardAsync(partnerId.Value, chatService, matchmakingService);
+                await _botClient.SendMessage(partnerId.Value, BotMessages.PartnerLeft, replyMarkup: partnerKeyboard);
             }
             return;
         }
@@ -287,12 +310,12 @@ public class TelegramUpdateHandler
         if (await matchmakingService.IsWaitingAsync(userId))
         {
             await matchmakingService.RemoveFromQueueAsync(userId);
-            await _botClient.SendMessage(userId, BotMessages.SearchStopped, replyMarkup: replyMarkup);
+            await _botClient.SendMessage(userId, BotMessages.SearchStopped, replyMarkup: GetIdleKeyboard());
             return;
         }
 
         // User is neither in chat nor in queue
-        await _botClient.SendMessage(userId, BotMessages.NotInChat, replyMarkup: replyMarkup);
+        await _botClient.SendMessage(userId, BotMessages.NotInChat, replyMarkup: GetIdleKeyboard());
     }
 
     /// <summary>
@@ -332,10 +355,30 @@ public class TelegramUpdateHandler
     }
 
     /// <summary>
-    /// <summary>
-    /// Gets the persistent keyboard menu for registered users.
+    /// Gets the keyboard based on user state (idle, searching, or in chat).
     /// </summary>
-    private ReplyKeyboardMarkup GetMainKeyboard()
+    private async Task<ReplyKeyboardMarkup> GetKeyboardAsync(long userId, IChatService chatService, IMatchmakingService matchmakingService)
+    {
+        // Check if user is in an active chat
+        if (chatService.IsInChat(userId))
+        {
+            return GetInChatKeyboard();
+        }
+
+        // Check if user is searching
+        if (await matchmakingService.IsWaitingAsync(userId))
+        {
+            return GetSearchingKeyboard();
+        }
+
+        // Default idle state
+        return GetIdleKeyboard();
+    }
+
+    /// <summary>
+    /// Gets the idle keyboard (no search, no chat).
+    /// </summary>
+    private ReplyKeyboardMarkup GetIdleKeyboard()
     {
         return new ReplyKeyboardMarkup(new[]
         {
@@ -343,10 +386,6 @@ public class TelegramUpdateHandler
             {
                 new KeyboardButton(BotMessages.MenuButtonFindPartner),
                 new KeyboardButton(BotMessages.MenuButtonProfile)
-            },
-            new[]
-            {
-                new KeyboardButton(BotMessages.MenuButtonStopChat)
             }
         })
         {
@@ -357,9 +396,61 @@ public class TelegramUpdateHandler
     }
 
     /// <summary>
+    /// Gets the searching keyboard (user is waiting for partner).
+    /// </summary>
+    private ReplyKeyboardMarkup GetSearchingKeyboard()
+    {
+        return new ReplyKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                new KeyboardButton(BotMessages.MenuButtonStopSearch),
+                new KeyboardButton(BotMessages.MenuButtonProfile)
+            }
+        })
+        {
+            ResizeKeyboard = true,
+            OneTimeKeyboard = false,
+            Selective = false
+        };
+    }
+
+    /// <summary>
+    /// Gets the in-chat keyboard (user is chatting with someone).
+    /// </summary>
+    private ReplyKeyboardMarkup GetInChatKeyboard()
+    {
+        return new ReplyKeyboardMarkup(new[]
+        {
+            new[]
+            {
+                new KeyboardButton(BotMessages.MenuButtonStopChat),
+                new KeyboardButton(BotMessages.MenuButtonNextPartner)
+            },
+            new[]
+            {
+                new KeyboardButton(BotMessages.MenuButtonProfile)
+            }
+        })
+        {
+            ResizeKeyboard = true,
+            OneTimeKeyboard = false,
+            Selective = false
+        };
+    }
+
+    /// <summary>
+    /// Gets the persistent keyboard menu for registered users (backward compatibility).
+    /// </summary>
+    private ReplyKeyboardMarkup GetMainKeyboard()
+    {
+        return GetIdleKeyboard();
+    }
+
+    /// <summary>
     /// Handles profile request - shows user information.
     /// </summary>
-    private async Task HandleProfileAsync(long userId, IRegistrationService registrationService)
+    private async Task HandleProfileAsync(long userId, IRegistrationService registrationService, IChatService chatService, IMatchmakingService matchmakingService)
     {
         var user = registrationService.GetUser(userId);
         if (user == null)
@@ -367,6 +458,28 @@ public class TelegramUpdateHandler
             await _botClient.SendMessage(userId, BotMessages.Error);
             return;
         }
+
+        // Silently update user info from Telegram to keep data fresh
+        // This happens in the background and doesn't affect the user experience
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var chat = await _botClient.GetChat(userId);
+                var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
+                var username = chat.Username;
+                
+                // Update if there's any new info
+                if (!string.IsNullOrEmpty(fullName) || !string.IsNullOrEmpty(username))
+                {
+                    registrationService.SetUserInfo(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not update user info for user {UserId}", userId);
+            }
+        });
 
         var genderText = user.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
         
@@ -378,7 +491,7 @@ public class TelegramUpdateHandler
             $"Ro'yxatga olindi: {uzbekistanTime:dd.MM.yyyy HH:mm}";
 
         // Add inline keyboard for gender change
-        var keyboard = new InlineKeyboardMarkup(new[]
+        var inlineKeyboard = new InlineKeyboardMarkup(new[]
         {
             new[]
             {
@@ -386,7 +499,11 @@ public class TelegramUpdateHandler
             }
         });
 
-        await _botClient.SendMessage(userId, profileMessage, replyMarkup: keyboard);
+        // Get the appropriate reply keyboard based on user state
+        var replyKeyboard = await GetKeyboardAsync(userId, chatService, matchmakingService);
+
+        await _botClient.SendMessage(userId, profileMessage, replyMarkup: inlineKeyboard);
+        await _botClient.SendMessage(userId, "Menu:", replyMarkup: replyKeyboard);
     }
 
     /// <summary>
@@ -427,7 +544,7 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles gender update from profile.
     /// </summary>
-    private async Task HandleGenderUpdateAsync(long userId, string data, string callbackId, IRegistrationService registrationService)
+    private async Task HandleGenderUpdateAsync(long userId, string data, string callbackId, IRegistrationService registrationService, IChatService chatService, IMatchmakingService matchmakingService)
     {
         var gender = data == "update_gender_male" ? Gender.Male : Gender.Female;
         registrationService.UpdateGender(userId, gender);
@@ -435,6 +552,6 @@ public class TelegramUpdateHandler
         await _botClient.AnswerCallbackQuery(callbackId, "✅ Jins muvaffaqiyatli o'zgartirildi!");
         
         // Show updated profile
-        await HandleProfileAsync(userId, registrationService);
+        await HandleProfileAsync(userId, registrationService, chatService, matchmakingService);
     }
 }

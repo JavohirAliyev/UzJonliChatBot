@@ -12,7 +12,9 @@ public static class BotMessages
         "/stop - Hozirgi suhbatni tugatish";
 
     public const string MenuButtonFindPartner = "🔍 Suhbatdosh topish";
-    public const string MenuButtonStopChat = "⏹️ Hozirgi suhbatni tugatish";
+    public const string MenuButtonNextPartner = "⏭️ Keyingi Suhbatdosh";
+    public const string MenuButtonStopChat = "⏹️ Suhbatni tugatish";
+    public const string MenuButtonStopSearch = "⏹️ Qidiruvni to'xtatish";
     public const string MenuButtonProfile = "👤 Profil";
 
     public const string GenderSelectionPrompt = "👋 Boshladik!\n\n" +
