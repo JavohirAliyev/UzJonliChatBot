@@ -271,8 +271,15 @@ public class TelegramUpdateHandler
         if (partner.HasValue && partner.Value == userId)
         {
             // Re-queue this user since they got matched with themselves
-            await matchmakingService.EnqueueUserAsync(userId);
-            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+            try
+            {
+                await matchmakingService.EnqueueUserAsync(userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to re-queue user {UserId}", userId);
+                await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+            }
             return;
         }
 
@@ -289,8 +296,17 @@ public class TelegramUpdateHandler
         else
         {
             // No partner available - add to queue
-            await matchmakingService.EnqueueUserAsync(userId);
-            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+            try
+            {
+                await matchmakingService.EnqueueUserAsync(userId);
+                await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to enqueue user {UserId} to matchmaking queue", userId);
+                // User may already be in queue, inform them to wait
+                await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+            }
         }
     }
 

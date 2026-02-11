@@ -53,12 +53,13 @@ public class UserRepository : IUserRepository
 
     public async Task<bool> ExistsAsync(long telegramId)
     {
-        return await _context.Users.AnyAsync(u => u.TelegramId == telegramId);
+        // Use AsNoTracking for read-only queries to improve performance
+        return await _context.Users.AsNoTracking().AnyAsync(u => u.TelegramId == telegramId);
     }
 
     public async Task<IEnumerable<User>> GetRegisteredUsersAsync()
     {
-        var entities = await _context.Users
+        var entities = await _context.Users.AsNoTracking()
             .Where(u => u.RegistrationStatus == "Registered" && u.IsAgeVerified)
             .ToListAsync();
 
@@ -67,7 +68,7 @@ public class UserRepository : IUserRepository
 
     public async Task<(IEnumerable<User> Users, int TotalCount)> GetAllUsersAsync(int page, int pageSize, string? searchTerm = null)
     {
-        var query = _context.Users.AsQueryable();
+        var query = _context.Users.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
@@ -256,18 +257,37 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         if (user == null)
             throw new InvalidOperationException($"User with Telegram ID {userId} does not exist. User must be registered first.");
 
-        var existingEntry = await _context.MatchmakingQueue
-            .FirstOrDefaultAsync(q => q.UserId == user.Id);
+        // Use a transaction to prevent race conditions
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        if (existingEntry == null)
+        await strategy.ExecuteAsync(async () =>
         {
-            _context.MatchmakingQueue.Add(new MatchmakingQueueEntity
+            using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable);
+            try
             {
-                UserId = user.Id,
-                QueuedAt = DateTime.UtcNow
-            });
-            await _context.SaveChangesAsync();
-        }
+                // Check again within the transaction to prevent race conditions
+                var existingEntry = await _context.MatchmakingQueue
+                    .FirstOrDefaultAsync(q => q.UserId == user.Id);
+
+                if (existingEntry == null)
+                {
+                    _context.MatchmakingQueue.Add(new MatchmakingQueueEntity
+                    {
+                        UserId = user.Id,
+                        QueuedAt = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync();
+                }
+
+                await transaction.CommitAsync();
+            }
+            catch (Exception)
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        });
     }
 
     public async Task<long?> DequeueAsync()
@@ -277,13 +297,12 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
         return await strategy.ExecuteAsync<long?>(async () =>
         {
-            // Use RepeatableRead isolation level for better performance than Serializable
-            // This prevents dirty reads while allowing better concurrency
+            // Use Serializable to prevent concurrent dequeue issues
             using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.RepeatableRead);
+                System.Data.IsolationLevel.Serializable);
             try
             {
-                // Get the first entry ordered by queue time
+                // Get the first entry ordered by queue time with the user's TelegramId
                 var entry = await _context.MatchmakingQueue
                     .Include(q => q.User)
                     .OrderBy(q => q.QueuedAt)
@@ -314,33 +333,41 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task RemoveFromQueueAsync(long telegramId)
     {
-        // telegramId is the Telegram ID, find the user first
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
+        // Optimize by doing this in a single transaction with proper isolation
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        if (user == null)
-            return;
-
-        var entry = await _context.MatchmakingQueue
-            .FirstOrDefaultAsync(q => q.UserId == user.Id);
-
-        if (entry != null)
+        await strategy.ExecuteAsync(async () =>
         {
-            _context.MatchmakingQueue.Remove(entry);
-            await _context.SaveChangesAsync();
-        }
+            using var transaction = await _context.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.RepeatableRead);
+            try
+            {
+                // Use a single query to find and remove
+                var entry = await _context.MatchmakingQueue
+                    .Where(q => q.User.TelegramId == telegramId)
+                    .FirstOrDefaultAsync();
+
+                if (entry != null)
+                {
+                    _context.MatchmakingQueue.Remove(entry);
+                    await _context.SaveChangesAsync();
+                }
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        });
     }
 
     public async Task<bool> IsInQueueAsync(long telegramId)
     {
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
-
-        if (user == null)
-            return false;
-
+        // Optimized: single query without the intermediate user lookup
         return await _context.MatchmakingQueue
-            .AnyAsync(q => q.UserId == user.Id);
+            .AnyAsync(q => q.User.TelegramId == telegramId);
     }
 }
 

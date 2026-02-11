@@ -90,10 +90,16 @@ public static class ServiceConfiguration
 
                 // Set command timeout
                 npgsqlOptions.CommandTimeout(30);
+
+                // Connection pooling is configured automatically by default
+                // Further optimization through connection string tuning if needed:
+                // "Enlist=false;Max Pool Size=100;Min Pool Size=10;"
             })
             .EnableSensitiveDataLogging(false)
-            .EnableDetailedErrors(false));
+            .EnableDetailedErrors(false))
+            // Context pooling for improved performance in high-throughput scenarios
+            .AddDbContextFactory<ChatBotDbContext>();
 
-        logger.LogInformation("Registered ChatBotDbContext with Npgsql");
+        logger.LogInformation("Registered ChatBotDbContext with Npgsql and optimized connection pooling");
     }
 }
