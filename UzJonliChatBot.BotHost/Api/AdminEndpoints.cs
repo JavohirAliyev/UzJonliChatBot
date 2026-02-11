@@ -70,7 +70,7 @@ public static class AdminEndpoints
                     telegramId = u.TelegramId,
                     fullName = u.FullName,
                     username = u.Username,
-                    gender = u.Gender?.ToString(),
+                    gender = u.Gender.ToString(),
                     isAgeVerified = u.IsAgeVerified,
                     registrationStatus = u.RegistrationStatus.ToString(),
                     isBanned = u.IsBanned,

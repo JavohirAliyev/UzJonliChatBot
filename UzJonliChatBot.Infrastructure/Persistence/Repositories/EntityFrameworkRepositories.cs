@@ -42,7 +42,7 @@ public class UserRepository : IUserRepository
 
         entity.FullName = user.FullName;
         entity.Username = user.Username;
-        entity.Gender = user.Gender?.ToString() ?? "Unknown";
+        entity.Gender = user.Gender.ToString();
         entity.IsAgeVerified = user.IsAgeVerified;
         entity.RegistrationStatus = user.RegistrationStatus.ToString();
         entity.IsBanned = user.IsBanned;
@@ -113,6 +113,11 @@ public class UserRepository : IUserRepository
 
     private static User MapToModel(UserEntity entity)
     {
+        if (string.IsNullOrEmpty(entity.Gender) || entity.Gender.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"User {entity.TelegramId} has no valid gender set. Gender is required.");
+        }
+
         return new User
         {
             TelegramId = entity.TelegramId,
@@ -247,7 +252,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         // userId is actually TelegramId - find the actual UserEntity.Id
         var user = await _context.Users
             .FirstOrDefaultAsync(u => u.TelegramId == userId);
-        
+
         if (user == null)
             throw new InvalidOperationException($"User with Telegram ID {userId} does not exist. User must be registered first.");
 
@@ -270,7 +275,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         // Use execution strategy to wrap the transaction - this is required when using
         // retry strategies with explicit transactions in EF Core
         var strategy = _context.Database.CreateExecutionStrategy();
-        
+
         return await strategy.ExecuteAsync<long?>(async () =>
         {
             // Use a transaction with serializable isolation level to prevent race conditions
@@ -373,7 +378,7 @@ public class AdminRepository : IAdminRepository
 
         _context.Admins.Add(entity);
         await _context.SaveChangesAsync();
-        
+
         admin.Id = entity.Id;
     }
 

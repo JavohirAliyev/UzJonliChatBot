@@ -29,7 +29,7 @@ public class User
     public long TelegramId { get; set; }
     public string? FullName { get; set; }
     public string? Username { get; set; }
-    public Gender? Gender { get; set; }
+    public Gender Gender { get; set; }
     public bool IsAgeVerified { get; set; }
     public UserRegistrationStatus RegistrationStatus { get; set; }
     public bool IsBanned { get; set; }
@@ -38,6 +38,7 @@ public class User
 
     public User()
     {
+        Gender = Gender.Male; // Default to Male
         RegistrationStatus = UserRegistrationStatus.NotStarted;
         IsAgeVerified = false;
         IsBanned = false;
