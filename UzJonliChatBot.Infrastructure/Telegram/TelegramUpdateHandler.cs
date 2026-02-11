@@ -267,6 +267,15 @@ public class TelegramUpdateHandler
         // Try to find a partner
         var partner = await matchmakingService.DequeueUserAsync();
 
+        // Prevent self-matching (user connecting to themselves due to race conditions)
+        if (partner.HasValue && partner.Value == userId)
+        {
+            // Re-queue this user since they got matched with themselves
+            await matchmakingService.EnqueueUserAsync(userId);
+            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+            return;
+        }
+
         if (partner.HasValue)
         {
             // Found a partner - create chat

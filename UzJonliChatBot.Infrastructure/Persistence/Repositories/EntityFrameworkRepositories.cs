@@ -272,47 +272,38 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task<long?> DequeueAsync()
     {
-        // Use execution strategy to wrap the transaction - this is required when using
-        // retry strategies with explicit transactions in EF Core
-        var strategy = _context.Database.CreateExecutionStrategy();
-
-        return await strategy.ExecuteAsync<long?>(async () =>
+        // Use a transaction with repeated read isolation level (better performance than Serializable)
+        // This prevents dirty reads while allowing better concurrency
+        using var transaction = await _context.Database.BeginTransactionAsync(
+            System.Data.IsolationLevel.RepeatableRead);
+        try
         {
-            // Use a transaction with serializable isolation level to prevent race conditions
-            // This ensures that concurrent dequeue operations don't return the same user
-            using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.Serializable);
-            try
+            // Get the first entry ordered by queue time
+            var entry = await _context.MatchmakingQueue
+                .Include(q => q.User)
+                .OrderBy(q => q.QueuedAt)
+                .FirstOrDefaultAsync();
+
+            if (entry == null)
             {
-                // Get the first entry ordered by queue time
-                // The serializable isolation level ensures no concurrent transaction
-                // can modify this row until we commit
-                var entry = await _context.MatchmakingQueue
-                    .Include(q => q.User)
-                    .OrderBy(q => q.QueuedAt)
-                    .FirstOrDefaultAsync();
-
-                if (entry == null)
-                {
-                    await transaction.CommitAsync();
-                    return null;
-                }
-
-                var telegramId = entry.User.TelegramId;
-
-                // Remove the entry atomically within the transaction
-                _context.MatchmakingQueue.Remove(entry);
-                await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
+                return null;
+            }
 
-                return telegramId;
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        });
+            var telegramId = entry.User.TelegramId;
+
+            // Remove the entry atomically within the transaction
+            _context.MatchmakingQueue.Remove(entry);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return telegramId;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     public async Task RemoveFromQueueAsync(long telegramId)
