@@ -243,10 +243,10 @@ public class TelegramUpdateHandler
         }
 
         // If user is already in a chat, stop it first
-        if (chatService.IsInChat(userId))
+        if (await chatService.IsInChatAsync(userId))
         {
-            var partnerId = chatService.GetPartner(userId);
-            chatService.EndChat(userId);
+            var partnerId = await chatService.GetPartnerAsync(userId);
+            await chatService.EndChatAsync(userId);
 
             await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetSearchingKeyboard());
 
@@ -270,7 +270,7 @@ public class TelegramUpdateHandler
         if (partner.HasValue)
         {
             // Found a partner - create chat
-            chatService.CreateChat(userId, partner.Value);
+            await chatService.CreateChatAsync(userId, partner.Value);
 
             // Send with in-chat keyboard
             var inChatKeyboard = GetInChatKeyboard();
@@ -291,10 +291,10 @@ public class TelegramUpdateHandler
     private async Task HandleStopAsync(long userId, IChatService chatService, IMatchmakingService matchmakingService)
     {
         // Check if user is in an active chat
-        if (chatService.IsInChat(userId))
+        if (await chatService.IsInChatAsync(userId))
         {
-            var partnerId = chatService.GetPartner(userId);
-            chatService.EndChat(userId);
+            var partnerId = await chatService.GetPartnerAsync(userId);
+            await chatService.EndChatAsync(userId);
 
             await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetIdleKeyboard());
 
@@ -330,13 +330,13 @@ public class TelegramUpdateHandler
             return;
         }
 
-        if (!chatService.IsInChat(userId))
+        if (!await chatService.IsInChatAsync(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.NotInChat);
             return;
         }
 
-        var partnerId = chatService.GetPartner(userId);
+        var partnerId = await chatService.GetPartnerAsync(userId);
         if (!partnerId.HasValue)
         {
             await _botClient.SendMessage(userId, BotMessages.Error);
@@ -360,7 +360,7 @@ public class TelegramUpdateHandler
     private async Task<ReplyKeyboardMarkup> GetKeyboardAsync(long userId, IChatService chatService, IMatchmakingService matchmakingService)
     {
         // Check if user is in an active chat
-        if (chatService.IsInChat(userId))
+        if (await chatService.IsInChatAsync(userId))
         {
             return GetInChatKeyboard();
         }

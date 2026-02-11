@@ -15,36 +15,36 @@ public class ChatService : IChatService
         _chatRepository = chatRepository;
     }
 
-    public bool IsInChat(long userId)
+    public async Task<bool> IsInChatAsync(long userId)
     {
-        return _chatRepository.IsInChatAsync(userId).Result;
+        return await _chatRepository.IsInChatAsync(userId);
     }
 
-    public long? GetPartner(long userId)
+    public async Task<long?> GetPartnerAsync(long userId)
     {
-        var chat = _chatRepository.GetActiveChatAsync(userId).Result;
+        var chat = await _chatRepository.GetActiveChatAsync(userId);
         if (chat == null)
             return null;
 
         return chat.User1Id == userId ? chat.User2Id : chat.User1Id;
     }
 
-    public void CreateChat(long user1, long user2)
+    public async Task CreateChatAsync(long user1, long user2)
     {
         var chat = new Chat
         {
             User1Id = user1,
             User2Id = user2
         };
-        _chatRepository.AddAsync(chat).Wait();
+        await _chatRepository.AddAsync(chat);
     }
 
-    public void EndChat(long userId)
+    public async Task EndChatAsync(long userId)
     {
-        var chat = _chatRepository.GetActiveChatAsync(userId).Result;
+        var chat = await _chatRepository.GetActiveChatAsync(userId);
         if (chat != null)
         {
-            _chatRepository.RemoveAsync(chat).Wait();
+            await _chatRepository.RemoveAsync(chat);
         }
     }
 }

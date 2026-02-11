@@ -2,8 +2,8 @@ namespace UzJonliChatBot.Application.Interfaces;
 
 public interface IChatService
 {
-    bool IsInChat(long userId);
-    long? GetPartner(long userId);
-    void CreateChat(long user1, long user2);
-    void EndChat(long userId);
+    Task<bool> IsInChatAsync(long userId);
+    Task<long?> GetPartnerAsync(long userId);
+    Task CreateChatAsync(long user1, long user2);
+    Task EndChatAsync(long userId);
 }

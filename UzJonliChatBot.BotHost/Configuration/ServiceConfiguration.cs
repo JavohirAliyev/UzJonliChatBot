@@ -31,7 +31,6 @@ public static class ServiceConfiguration
         logger.LogInformation("Registered repositories");
 
         // Register application services
-        services.AddScoped<IUserService, UserService>();
         services.AddScoped<IRegistrationService, RegistrationService>();
         services.AddScoped<IMatchmakingService, MatchmakingService>();
         services.AddScoped<IChatService, ChatService>();
