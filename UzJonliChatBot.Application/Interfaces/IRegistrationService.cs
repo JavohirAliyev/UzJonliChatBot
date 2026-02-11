@@ -18,9 +18,19 @@ public interface IRegistrationService
     void SetGender(long userId, Gender gender);
 
     /// <summary>
+    /// Sets the user's gender asynchronously.
+    /// </summary>
+    Task SetGenderAsync(long userId, Gender gender);
+
+    /// <summary>
     /// Sets the user's full name and username.
     /// </summary>
     void SetUserInfo(long userId, string? fullName, string? username);
+
+    /// <summary>
+    /// Sets the user's full name and username asynchronously.
+    /// </summary>
+    Task SetUserInfoAsync(long userId, string? fullName, string? username);
 
     /// <summary>
     /// Updates the user's gender.
@@ -28,9 +38,19 @@ public interface IRegistrationService
     void UpdateGender(long userId, Gender gender);
 
     /// <summary>
+    /// Updates the user's gender asynchronously.
+    /// </summary>
+    Task UpdateGenderAsync(long userId, Gender gender);
+
+    /// <summary>
     /// Confirms the user is 18 or older.
     /// </summary>
     void ConfirmAge(long userId);
+
+    /// <summary>
+    /// Confirms the user is 18 or older asynchronously.
+    /// </summary>
+    Task ConfirmAgeAsync(long userId);
 
     /// <summary>
     /// Gets user details.
@@ -42,3 +62,4 @@ public interface IRegistrationService
     /// </summary>
     bool IsRegistered(long userId);
 }
+

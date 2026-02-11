@@ -38,6 +38,22 @@ public class RegistrationService : IRegistrationService
         _userRepository.AddOrUpdateAsync(user).Wait();
     }
 
+    public async Task SetGenderAsync(long userId, Gender gender)
+    {
+        var user = await _userRepository.GetByTelegramIdAsync(userId);
+
+        if (user == null)
+        {
+            user = new User { TelegramId = userId };
+        }
+
+        user.Gender = gender;
+        user.RegistrationStatus = UserRegistrationStatus.AgeVerificationPending;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _userRepository.AddOrUpdateAsync(user);
+    }
+
     public void SetUserInfo(long userId, string? fullName, string? username)
     {
         var user = _userRepository.GetByTelegramIdAsync(userId).Result;
@@ -54,6 +70,22 @@ public class RegistrationService : IRegistrationService
         _userRepository.AddOrUpdateAsync(user).Wait();
     }
 
+    public async Task SetUserInfoAsync(long userId, string? fullName, string? username)
+    {
+        var user = await _userRepository.GetByTelegramIdAsync(userId);
+
+        if (user == null)
+        {
+            user = new User { TelegramId = userId };
+        }
+
+        user.FullName = fullName;
+        user.Username = username;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _userRepository.AddOrUpdateAsync(user);
+    }
+
     public void UpdateGender(long userId, Gender gender)
     {
         var user = _userRepository.GetByTelegramIdAsync(userId).Result;
@@ -63,6 +95,18 @@ public class RegistrationService : IRegistrationService
             user.Gender = gender;
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.AddOrUpdateAsync(user).Wait();
+        }
+    }
+
+    public async Task UpdateGenderAsync(long userId, Gender gender)
+    {
+        var user = await _userRepository.GetByTelegramIdAsync(userId);
+
+        if (user != null)
+        {
+            user.Gender = gender;
+            user.UpdatedAt = DateTime.UtcNow;
+            await _userRepository.AddOrUpdateAsync(user);
         }
     }
 
@@ -80,6 +124,22 @@ public class RegistrationService : IRegistrationService
         user.UpdatedAt = DateTime.UtcNow;
 
         _userRepository.AddOrUpdateAsync(user).Wait();
+    }
+
+    public async Task ConfirmAgeAsync(long userId)
+    {
+        var user = await _userRepository.GetByTelegramIdAsync(userId);
+
+        if (user == null)
+        {
+            user = new User { TelegramId = userId };
+        }
+
+        user.IsAgeVerified = true;
+        user.RegistrationStatus = UserRegistrationStatus.Registered;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _userRepository.AddOrUpdateAsync(user);
     }
 
     public User? GetUser(long userId)

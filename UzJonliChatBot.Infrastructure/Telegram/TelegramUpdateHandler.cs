@@ -39,7 +39,7 @@ public class TelegramUpdateHandler
         {
             // Create a scope for this update to resolve scoped services
             using var scope = _serviceProvider.CreateScope();
-            
+
             if (update.Message?.Type == MessageType.Text)
             {
                 await HandleMessageAsync(update.Message, scope);
@@ -51,7 +51,7 @@ public class TelegramUpdateHandler
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling update {UpdateId} from user {UserId}", 
+            _logger.LogError(ex, "Error handling update {UpdateId} from user {UserId}",
                 update.Id, update.Message?.Chat.Id ?? update.CallbackQuery?.From.Id ?? 0);
         }
     }
@@ -153,10 +153,10 @@ public class TelegramUpdateHandler
                     var chat = await _botClient.GetChat(userId);
                     var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
                     var username = chat.Username;
-                    
+
                     if (!string.IsNullOrEmpty(fullName) || !string.IsNullOrEmpty(username))
                     {
-                        registrationService.SetUserInfo(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
+                        await registrationService.SetUserInfoAsync(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
                     }
                 }
                 catch (Exception ex)
@@ -164,7 +164,7 @@ public class TelegramUpdateHandler
                     _logger.LogWarning(ex, "Could not update user info for user {UserId}", userId);
                 }
             });
-            
+
             await HandleStartAsync(userId);
             return;
         }
@@ -175,9 +175,9 @@ public class TelegramUpdateHandler
             var chat = await _botClient.GetChat(userId);
             var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
             var username = chat.Username;
-            
+
             // Save user info
-            registrationService.SetUserInfo(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
+            await registrationService.SetUserInfoAsync(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
         }
         catch (Exception ex)
         {
@@ -203,7 +203,7 @@ public class TelegramUpdateHandler
     private async Task HandleGenderSelectionAsync(long userId, string data, string callbackId, IRegistrationService registrationService)
     {
         var gender = data == "gender_male" ? Gender.Male : Gender.Female;
-        registrationService.SetGender(userId, gender);
+        await registrationService.SetGenderAsync(userId, gender);
 
         // Show age verification prompt
         var keyboard = new InlineKeyboardMarkup(new[]
@@ -224,7 +224,7 @@ public class TelegramUpdateHandler
     /// </summary>
     private async Task HandleAgeVerificationAsync(long userId, string callbackId, IRegistrationService registrationService)
     {
-        registrationService.ConfirmAge(userId);
+        await registrationService.ConfirmAgeAsync(userId);
         // Answer the callback early so the UI doesn't appear to lag, then send the confirmation message.
         await _botClient.AnswerCallbackQuery(callbackId);
         await _botClient.SendMessage(userId, BotMessages.RegistrationComplete, replyMarkup: GetMainKeyboard());
@@ -249,7 +249,7 @@ public class TelegramUpdateHandler
             chatService.EndChat(userId);
 
             await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetSearchingKeyboard());
-            
+
             if (partnerId.HasValue)
             {
                 var partnerKeyboard = await GetKeyboardAsync(partnerId.Value, chatService, matchmakingService);
@@ -271,7 +271,7 @@ public class TelegramUpdateHandler
         {
             // Found a partner - create chat
             chatService.CreateChat(userId, partner.Value);
-            
+
             // Send with in-chat keyboard
             var inChatKeyboard = GetInChatKeyboard();
             await _botClient.SendMessage(userId, BotMessages.FoundPartner, replyMarkup: inChatKeyboard);
@@ -297,7 +297,7 @@ public class TelegramUpdateHandler
             chatService.EndChat(userId);
 
             await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetIdleKeyboard());
-            
+
             if (partnerId.HasValue)
             {
                 var partnerKeyboard = await GetKeyboardAsync(partnerId.Value, chatService, matchmakingService);
@@ -468,11 +468,11 @@ public class TelegramUpdateHandler
                 var chat = await _botClient.GetChat(userId);
                 var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
                 var username = chat.Username;
-                
+
                 // Update if there's any new info
                 if (!string.IsNullOrEmpty(fullName) || !string.IsNullOrEmpty(username))
                 {
-                    registrationService.SetUserInfo(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
+                    await registrationService.SetUserInfoAsync(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
                 }
             }
             catch (Exception ex)
@@ -482,10 +482,10 @@ public class TelegramUpdateHandler
         });
 
         var genderText = user.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
-        
+
         // Convert UTC to GMT+5 (Uzbekistan Time)
         var uzbekistanTime = user.CreatedAt.AddHours(5);
-        
+
         var profileMessage = $"👤 Sizning Profilingiz\n\n" +
             $"Jins: {genderText}\n" +
             $"Ro'yxatga olindi: {uzbekistanTime:dd.MM.yyyy HH:mm}";
@@ -543,10 +543,10 @@ public class TelegramUpdateHandler
     private async Task HandleGenderUpdateAsync(long userId, string data, string callbackId, IRegistrationService registrationService, IChatService chatService, IMatchmakingService matchmakingService)
     {
         var gender = data == "update_gender_male" ? Gender.Male : Gender.Female;
-        registrationService.UpdateGender(userId, gender);
+        await registrationService.UpdateGenderAsync(userId, gender);
 
         await _botClient.AnswerCallbackQuery(callbackId, "✅ Jins muvaffaqiyatli o'zgartirildi!");
-        
+
         // Show updated profile
         await HandleProfileAsync(userId, registrationService, chatService, matchmakingService);
     }
