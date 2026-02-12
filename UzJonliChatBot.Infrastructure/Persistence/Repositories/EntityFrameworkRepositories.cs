@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using UzJonliChatBot.Application.Interfaces;
 using UzJonliChatBot.Application.Models;
 using UzJonliChatBot.Infrastructure.Persistence.Entities;
@@ -140,16 +142,20 @@ public class UserRepository : IUserRepository
 public class ChatRepository : IChatRepository
 {
     private readonly ChatBotDbContext _context;
-
-    public ChatRepository(ChatBotDbContext context)
+    private readonly ILogger<ChatRepository> _logger;
+    public ChatRepository(ChatBotDbContext context, ILogger<ChatRepository> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task<Chat?> GetActiveChatAsync(long telegramId)
     {
-        // OPTIMIZED: Only select IDs/TelegramIds to avoid loading full User entities
-        var chat = await _context.ActiveChats
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            // OPTIMIZED: Only select IDs/TelegramIds to avoid loading full User entities
+            var chat = await _context.ActiveChats
             .Where(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId)
             .Select(c => new
             {
@@ -162,67 +168,100 @@ public class ChatRepository : IChatRepository
             })
             .FirstOrDefaultAsync();
 
-        if (chat == null)
-            return null;
+            if (chat == null)
+                return null;
 
-        // Map selected fields into Chat model (using TelegramIds as User1Id/User2Id)
-        return new Chat
+            // Map selected fields into Chat model (using TelegramIds as User1Id/User2Id)
+            return new Chat
+            {
+                Id = chat.Id,
+                User1Id = chat.User1Telegram,
+                User2Id = chat.User2Telegram,
+                StartedAt = chat.StartedAt
+            };
+        }
+        finally
         {
-            Id = chat.Id,
-            User1Id = chat.User1Telegram,
-            User2Id = chat.User2Telegram,
-            StartedAt = chat.StartedAt
-        };
+            sw.Stop();
+            _logger?.LogDebug("GetActiveChatAsync for telegramId {TelegramId} elapsedMs {ElapsedMs}", telegramId, sw.ElapsedMilliseconds);
+        }
     }
 
     public async Task AddAsync(Chat chat)
     {
-        // OPTIMIZED: Use parameterized query to find both users in one efficient operation
-        var users = await _context.Users
-            .AsNoTracking()
-            .Where(u => u.TelegramId == chat.User1Id || u.TelegramId == chat.User2Id)
-            .ToListAsync();
-
-        var user1 = users.FirstOrDefault(u => u.TelegramId == chat.User1Id);
-        var user2 = users.FirstOrDefault(u => u.TelegramId == chat.User2Id);
-
-        if (user1 == null)
-            throw new InvalidOperationException($"User with Telegram ID {chat.User1Id} does not exist. User must be registered first.");
-        if (user2 == null)
-            throw new InvalidOperationException($"User with Telegram ID {chat.User2Id} does not exist. User must be registered first.");
-
-        var entity = new ActiveChatEntity
+        var sw = Stopwatch.StartNew();
+        try
         {
-            User1Id = user1.Id,
-            User2Id = user2.Id,
-            StartedAt = chat.StartedAt
-        };
+            // OPTIMIZED: Use parameterized query to find both users in one efficient operation
+            var users = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.TelegramId == chat.User1Id || u.TelegramId == chat.User2Id)
+                .ToListAsync();
 
-        _context.ActiveChats.Add(entity);
-        await _context.SaveChangesAsync();
+            var user1 = users.FirstOrDefault(u => u.TelegramId == chat.User1Id);
+            var user2 = users.FirstOrDefault(u => u.TelegramId == chat.User2Id);
+
+            if (user1 == null)
+                throw new InvalidOperationException($"User with Telegram ID {chat.User1Id} does not exist. User must be registered first.");
+            if (user2 == null)
+                throw new InvalidOperationException($"User with Telegram ID {chat.User2Id} does not exist. User must be registered first.");
+
+            var entity = new ActiveChatEntity
+            {
+                User1Id = user1.Id,
+                User2Id = user2.Id,
+                StartedAt = chat.StartedAt
+            };
+
+            _context.ActiveChats.Add(entity);
+            await _context.SaveChangesAsync();
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("AddAsync Chat between {User1} and {User2} elapsedMs {ElapsedMs}", chat.User1Id, chat.User2Id, sw.ElapsedMilliseconds);
+        }
     }
 
     public async Task RemoveAsync(Chat chat)
     {
-        // OPTIMIZED: Single query using TelegramId directly
-        var entity = await _context.ActiveChats
-            .FirstOrDefaultAsync(c =>
-                (c.User1.TelegramId == chat.User1Id && c.User2.TelegramId == chat.User2Id) ||
-                (c.User1.TelegramId == chat.User2Id && c.User2.TelegramId == chat.User1Id));
-
-        if (entity != null)
+        var sw = Stopwatch.StartNew();
+        try
         {
-            _context.ActiveChats.Remove(entity);
-            await _context.SaveChangesAsync();
+            // OPTIMIZED: Single query using TelegramId directly
+            var entity = await _context.ActiveChats
+                .FirstOrDefaultAsync(c =>
+                    (c.User1.TelegramId == chat.User1Id && c.User2.TelegramId == chat.User2Id) ||
+                    (c.User1.TelegramId == chat.User2Id && c.User2.TelegramId == chat.User1Id));
+
+            if (entity != null)
+            {
+                _context.ActiveChats.Remove(entity);
+                await _context.SaveChangesAsync();
+            }
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("RemoveAsync Chat {ChatId} elapsedMs {ElapsedMs}", chat.Id, sw.ElapsedMilliseconds);
         }
     }
 
     public async Task<bool> IsInChatAsync(long telegramId)
     {
-        // OPTIMIZED: Single query with proper JOIN - no intermediate lookup
-        return await _context.ActiveChats
-            .AsNoTracking()
-            .AnyAsync(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            // OPTIMIZED: Single query with proper JOIN - no intermediate lookup
+            return await _context.ActiveChats
+                .AsNoTracking()
+                .AnyAsync(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId);
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("IsInChatAsync for telegramId {TelegramId} elapsedMs {ElapsedMs}", telegramId, sw.ElapsedMilliseconds);
+        }
     }
 
     private static Chat MapToModel(ActiveChatEntity entity)
@@ -244,124 +283,161 @@ public class ChatRepository : IChatRepository
 public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 {
     private readonly ChatBotDbContext _context;
+    private readonly ILogger<MatchmakingQueueRepository> _logger;
 
-    public MatchmakingQueueRepository(ChatBotDbContext context)
+    public MatchmakingQueueRepository(ChatBotDbContext context, ILogger<MatchmakingQueueRepository> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task EnqueueAsync(long userId)
     {
-        // Use execution strategy for writes so transactions are retriable
-        var strategy = _context.Database.CreateExecutionStrategy();
-
-        await strategy.ExecuteAsync(async () =>
+        var sw = Stopwatch.StartNew();
+        try
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            // Use execution strategy for writes so transactions are retriable
+            var strategy = _context.Database.CreateExecutionStrategy();
+
+            await strategy.ExecuteAsync(async () =>
             {
-                // Check if user exists AND not in queue in ONE query
-                var user = await _context.Users
-                    .Where(u => u.TelegramId == userId)
-                    .Select(u => new { u.Id, InQueue = u.QueueEntry != null })
-                    .FirstOrDefaultAsync();
-
-                if (user == null)
-                    throw new InvalidOperationException($"User {userId} not found");
-
-                if (user.InQueue)
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
+                    // Check if user exists AND not in queue in ONE query
+                    var user = await _context.Users
+                        .Where(u => u.TelegramId == userId)
+                        .Select(u => new { u.Id, InQueue = u.QueueEntry != null })
+                        .FirstOrDefaultAsync();
+
+                    if (user == null)
+                        throw new InvalidOperationException($"User {userId} not found");
+
+                    if (user.InQueue)
+                    {
+                        await transaction.CommitAsync();
+                        return; // Already queued, exit early
+                    }
+
+                    // Add to queue
+                    _context.MatchmakingQueue.Add(new MatchmakingQueueEntity
+                    {
+                        UserId = user.Id,
+                        QueuedAt = DateTime.UtcNow
+                    });
+
+                    await _context.SaveChangesAsync();
                     await transaction.CommitAsync();
-                    return; // Already queued, exit early
                 }
-
-                // Add to queue
-                _context.MatchmakingQueue.Add(new MatchmakingQueueEntity
+                catch (Exception)
                 {
-                    UserId = user.Id,
-                    QueuedAt = DateTime.UtcNow
-                });
-
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-            }
-            catch (Exception)
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        });
+                    await transaction.RollbackAsync();
+                    throw;
+                }
+            });
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("EnqueueAsync for telegramId {TelegramId} elapsedMs {ElapsedMs}", userId, sw.ElapsedMilliseconds);
+        }
     }
 
     public async Task<long?> DequeueAsync()
     {
-        // Dequeue performs a delete, so run inside the execution strategy to support retries
-        var strategy = _context.Database.CreateExecutionStrategy();
-
-        return await strategy.ExecuteAsync<long?>(async () =>
+        var sw = Stopwatch.StartNew();
+        try
         {
-            using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.RepeatableRead);
-            try
-            {
-                // SINGLE QUERY: Select and delete atomically
-                var entry = await _context.MatchmakingQueue
-                    .OrderBy(q => q.QueuedAt)
-                    .Select(q => new { q.Id, q.User.TelegramId })
-                    .FirstOrDefaultAsync();
+            // Dequeue performs a delete, so run inside the execution strategy to support retries
+            var strategy = _context.Database.CreateExecutionStrategy();
 
-                if (entry == null)
+            return await strategy.ExecuteAsync<long?>(async () =>
+            {
+                using var transaction = await _context.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.RepeatableRead);
+                try
                 {
+                    // SINGLE QUERY: Select and delete atomically
+                    var entry = await _context.MatchmakingQueue
+                        .OrderBy(q => q.QueuedAt)
+                        .Select(q => new { q.Id, q.User.TelegramId })
+                        .FirstOrDefaultAsync();
+
+                    if (entry == null)
+                    {
+                        await transaction.CommitAsync();
+                        return null;
+                    }
+
+                    // Delete directly without re-fetching
+                    await _context.Database.ExecuteSqlInterpolatedAsync(
+                        $"DELETE FROM \"MatchmakingQueue\" WHERE \"Id\" = {entry.Id}");
+
                     await transaction.CommitAsync();
-                    return null;
+                    return entry.TelegramId;
                 }
-
-                // Delete directly without re-fetching
-                await _context.Database.ExecuteSqlInterpolatedAsync(
-                    $"DELETE FROM \"MatchmakingQueue\" WHERE \"Id\" = {entry.Id}");
-
-                await transaction.CommitAsync();
-                return entry.TelegramId;
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        });
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
+            });
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("DequeueAsync elapsedMs {ElapsedMs}", sw.ElapsedMilliseconds);
+        }
     }
 
     public async Task RemoveFromQueueAsync(long telegramId)
     {
-        // Optimize by doing this in a single transaction with proper isolation
-        var strategy = _context.Database.CreateExecutionStrategy();
-
-        await strategy.ExecuteAsync(async () =>
+        var sw = Stopwatch.StartNew();
+        try
         {
-            using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.RepeatableRead);
-            try
-            {
-                // OPTIMIZED: Single delete operation with parameterized SQL
-                await _context.Database.ExecuteSqlInterpolatedAsync(
-                    $@"DELETE FROM ""MatchmakingQueue"" 
-                      WHERE ""UserId"" = (SELECT ""Id"" FROM ""Users"" WHERE ""TelegramId"" = {telegramId})");
+            // Optimize by doing this in a single transaction with proper isolation
+            var strategy = _context.Database.CreateExecutionStrategy();
 
-                await transaction.CommitAsync();
-            }
-            catch
+            await strategy.ExecuteAsync(async () =>
             {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        });
+                using var transaction = await _context.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.RepeatableRead);
+                try
+                {
+                    // OPTIMIZED: Single delete operation with parameterized SQL
+                    await _context.Database.ExecuteSqlInterpolatedAsync(
+                        $"DELETE FROM \"MatchmakingQueue\" WHERE \"UserId\" = (SELECT \"Id\" FROM \"Users\" WHERE \"TelegramId\" = {telegramId})");
+
+                    await transaction.CommitAsync();
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
+            });
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("RemoveFromQueueAsync for telegramId {TelegramId} elapsedMs {ElapsedMs}", telegramId, sw.ElapsedMilliseconds);
+        }
     }
 
     public async Task<bool> IsInQueueAsync(long telegramId)
     {
-        // Optimized: single query without the intermediate user lookup
-        return await _context.MatchmakingQueue
-            .AnyAsync(q => q.User.TelegramId == telegramId);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            // Optimized: single query without the intermediate user lookup
+            return await _context.MatchmakingQueue
+                .AnyAsync(q => q.User.TelegramId == telegramId);
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("IsInQueueAsync for telegramId {TelegramId} elapsedMs {ElapsedMs}", telegramId, sw.ElapsedMilliseconds);
+        }
     }
 }
 
