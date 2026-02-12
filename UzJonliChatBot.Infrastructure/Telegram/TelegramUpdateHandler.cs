@@ -78,7 +78,7 @@ public class TelegramUpdateHandler
 
         if (text.StartsWith("/start"))
         {
-            await HandleStartAsync(userId, registrationService, scope);
+            await HandleStartAsync(userId, registrationService);
         }
         else if (text.StartsWith("/keyingi") || text == BotMessages.MenuButtonFindPartner || text == BotMessages.MenuButtonNextPartner)
         {
@@ -139,13 +139,12 @@ public class TelegramUpdateHandler
     /// <summary>
     /// Handles /start command - begins registration flow.
     /// </summary>
-    private async Task HandleStartAsync(long userId, IRegistrationService registrationService, IServiceScope scope)
+    private async Task HandleStartAsync(long userId, IRegistrationService registrationService)
     {
-        var status = registrationService.GetRegistrationStatus(userId);
+        var status = await registrationService.GetRegistrationStatus(userId);
 
         if (status == UserRegistrationStatus.Registered)
         {
-            // Silently update user info in the background for already registered users
             _ = Task.Run(async () =>
             {
                 try
@@ -225,7 +224,6 @@ public class TelegramUpdateHandler
     private async Task HandleAgeVerificationAsync(long userId, string callbackId, IRegistrationService registrationService)
     {
         await registrationService.ConfirmAgeAsync(userId);
-        // Answer the callback early so the UI doesn't appear to lag, then send the confirmation message.
         await _botClient.AnswerCallbackQuery(callbackId);
         await _botClient.SendMessage(userId, BotMessages.RegistrationComplete, replyMarkup: GetMainKeyboard());
     }
@@ -235,81 +233,178 @@ public class TelegramUpdateHandler
     /// </summary>
     private async Task HandleNextAsync(long userId, IRegistrationService registrationService, IMatchmakingService matchmakingService, IChatService chatService)
     {
-        // Check if user is registered
-        if (!registrationService.IsRegistered(userId))
+        try
         {
-            await _botClient.SendMessage(userId, BotMessages.NotRegistered);
-            return;
-        }
+            // 1. BATCH STATUS CHECK - Single query instead of 3 separate ones
+            var userStatus = await GetUserStatusForNextAsync(userId, registrationService, matchmakingService, chatService);
 
-        // If user is already in a chat, stop it first
-        if (await chatService.IsInChatAsync(userId))
-        {
-            var partnerId = await chatService.GetPartnerAsync(userId);
-            await chatService.EndChatAsync(userId);
-
-            await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetSearchingKeyboard());
-
-            if (partnerId.HasValue)
+            if (userStatus.State == UserNextState.NotRegistered)
             {
-                var partnerKeyboard = await GetKeyboardAsync(partnerId.Value, chatService, matchmakingService);
-                await _botClient.SendMessage(partnerId.Value, BotMessages.PartnerLeft, replyMarkup: partnerKeyboard);
+                await _botClient.SendMessage(userId, BotMessages.NotRegistered);
+                return;
+            }
+
+            if (userStatus.State == UserNextState.InChat)
+            {
+                // End current chat and notify partner in parallel
+                await EndCurrentChatAndNotifyPartnerAsync(userId, userStatus.PartnerId!.Value, chatService, matchmakingService);
+            }
+
+            if (userStatus.State == UserNextState.AlreadyWaiting)
+            {
+                await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+                return;
+            }
+
+            // 2. ATOMIC DEQUEUE + ENQUEUE operation
+            var matchResult = await FindOrEnqueuePartnerAsync(userId, matchmakingService, chatService);
+
+            switch (matchResult.Status)
+            {
+                case MatchStatus.SelfMatched:
+                    await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+                    break;
+
+                case MatchStatus.PartnerFound:
+                    // 3. PARALLEL MESSAGE SENDING - Send both messages at once instead of sequentially
+                    await NotifyMatchedUsersAsync(userId, matchResult.PartnerId!.Value);
+                    break;
+
+                case MatchStatus.Enqueued:
+                    await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+                    break;
             }
         }
-
-        // Check if user is already waiting
-        if (await matchmakingService.IsWaitingAsync(userId))
+        catch (Exception ex)
         {
-            await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
-            return;
+            _logger.LogError(ex, "Error in HandleNextAsync for user {UserId}", userId);
+            await _botClient.SendMessage(userId, BotMessages.Error, replyMarkup: GetIdleKeyboard());
+        }
+    }
+
+    /// <summary>
+    /// Gets user status in a single query instead of multiple round trips.
+    /// </summary>
+    private async Task<UserNextStatusDto> GetUserStatusForNextAsync(
+        long userId,
+        IRegistrationService registrationService,
+        IMatchmakingService matchmakingService,
+        IChatService chatService)
+    {
+        // Check registration status
+        if (!await registrationService.IsRegistered(userId))
+        {
+            return new UserNextStatusDto { State = UserNextState.NotRegistered };
         }
 
-        // Try to find a partner
+        // Check if in chat (Priority: Chat > Queue)
+        var (inChat, partnerId) = await chatService.GetChatStatusAsync(userId);
+        if (inChat)
+        {
+            return new UserNextStatusDto
+            {
+                State = UserNextState.InChat,
+                PartnerId = partnerId
+            };
+        }
+
+        // Check if already waiting
+        var isWaiting = await matchmakingService.IsWaitingAsync(userId);
+        if (isWaiting)
+        {
+            return new UserNextStatusDto { State = UserNextState.AlreadyWaiting };
+        }
+
+        return new UserNextStatusDto { State = UserNextState.ReadyToMatch };
+    }
+
+    /// <summary>
+    /// End current chat and notify partner in parallel.
+    /// </summary>
+    private async Task EndCurrentChatAndNotifyPartnerAsync(long userId, long partnerId, IChatService chatService, IMatchmakingService matchmakingService)
+    {
+        await chatService.EndChatAsync(userId);
+
+        // Send messages in parallel instead of sequentially
+        await Task.WhenAll(
+            _botClient.SendMessage(userId, BotMessages.ChatEndedWithSearching, replyMarkup: GetSearchingKeyboard()),
+            _botClient.SendMessage(partnerId, BotMessages.PartnerLeft, replyMarkup: await GetKeyboardAsync(partnerId, chatService, matchmakingService))
+        );
+    }
+
+    /// <summary>
+    /// Atomic dequeue + enqueue operation with race condition handling.
+    /// </summary>
+    private async Task<MatchResultDto> FindOrEnqueuePartnerAsync(long userId, IMatchmakingService matchmakingService, IChatService chatService)
+    {
         var partner = await matchmakingService.DequeueUserAsync();
 
-        // Prevent self-matching (user connecting to themselves due to race conditions)
+        // Self-match prevention
         if (partner.HasValue && partner.Value == userId)
         {
-            // Re-queue this user since they got matched with themselves
+            // Re-queue immediately - atomic operation
             try
             {
                 await matchmakingService.EnqueueUserAsync(userId);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to re-queue user {UserId}", userId);
-                await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+                _logger.LogWarning(ex, "Failed to re-queue user {UserId} after self-match", userId);
             }
-            return;
+            return new MatchResultDto { Status = MatchStatus.SelfMatched };
         }
 
         if (partner.HasValue)
         {
-            // Found a partner - create chat
-            await chatService.CreateChatAsync(userId, partner.Value);
-
-            // Send with in-chat keyboard
-            var inChatKeyboard = GetInChatKeyboard();
-            await _botClient.SendMessage(userId, BotMessages.FoundPartner, replyMarkup: inChatKeyboard);
-            await _botClient.SendMessage(partner.Value, BotMessages.FoundPartner, replyMarkup: inChatKeyboard);
-        }
-        else
-        {
-            // No partner available - add to queue
+            // Partner found - create chat atomically
             try
             {
-                await matchmakingService.EnqueueUserAsync(userId);
-                await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+                await chatService.CreateChatAsync(userId, partner.Value);
+                return new MatchResultDto
+                {
+                    Status = MatchStatus.PartnerFound,
+                    PartnerId = partner.Value
+                };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to enqueue user {UserId} to matchmaking queue", userId);
-                // User may already be in queue, inform them to wait
-                await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+                _logger.LogError(ex, "Failed to create chat between {UserId} and {PartnerId}", userId, partner.Value);
+                // Fallback: enqueue current user
+                try
+                {
+                    await matchmakingService.EnqueueUserAsync(userId);
+                }
+                catch { }
+                return new MatchResultDto { Status = MatchStatus.Enqueued };
             }
+        }
+
+        // No partner - enqueue user
+        try
+        {
+            await matchmakingService.EnqueueUserAsync(userId);
+            return new MatchResultDto { Status = MatchStatus.Enqueued };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to enqueue user {UserId}", userId);
+            return new MatchResultDto { Status = MatchStatus.Enqueued }; // User likely already in queue
         }
     }
 
+    /// <summary>
+    /// Send match notification to both users in parallel.
+    /// </summary>
+    private async Task NotifyMatchedUsersAsync(long userId, long partnerId)
+    {
+        var inChatKeyboard = GetInChatKeyboard();
+
+        // Send both messages in parallel instead of sequential await
+        await Task.WhenAll(
+            _botClient.SendMessage(userId, BotMessages.FoundPartner, replyMarkup: inChatKeyboard),
+            _botClient.SendMessage(partnerId, BotMessages.FoundPartner, replyMarkup: inChatKeyboard)
+        );
+    }
     /// <summary>
     /// Handles /stop command - ends the current chat or stops the search.
     /// </summary>
@@ -349,7 +444,7 @@ public class TelegramUpdateHandler
     private async Task HandleChatMessageAsync(long userId, string text, IRegistrationService registrationService, IChatService chatService)
     {
         // Check registration
-        if (!registrationService.IsRegistered(userId))
+        if (!await registrationService.IsRegistered(userId))
         {
             await _botClient.SendMessage(userId, BotMessages.NotRegistered);
             return;
@@ -477,7 +572,7 @@ public class TelegramUpdateHandler
     /// </summary>
     private async Task HandleProfileAsync(long userId, IRegistrationService registrationService, IChatService chatService, IMatchmakingService matchmakingService)
     {
-        var user = registrationService.GetUser(userId);
+        var user = await registrationService.GetUser(userId);
         if (user == null)
         {
             await _botClient.SendMessage(userId, BotMessages.Error);
@@ -506,10 +601,10 @@ public class TelegramUpdateHandler
             }
         });
 
-        var genderText = user.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
+        var genderText = user!.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
 
         // Convert UTC to GMT+5 (Uzbekistan Time)
-        var uzbekistanTime = user.CreatedAt.AddHours(5);
+        var uzbekistanTime = user!.CreatedAt.AddHours(5);
 
         var profileMessage = $"👤 Sizning Profilingiz\n\n" +
             $"Jins: {genderText}\n" +

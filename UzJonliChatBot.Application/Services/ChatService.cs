@@ -44,4 +44,14 @@ public class ChatService : IChatService
             await _chatRepository.RemoveAsync(chat);
         }
     }
+
+    public async Task<(bool InChat, long? PartnerId)> GetChatStatusAsync(long userId)
+    {
+        var chat = await _chatRepository.GetActiveChatAsync(userId);
+        if (chat == null)
+            return (false, null);
+
+        var partnerId = chat.User1Id == userId ? chat.User2Id : chat.User1Id;
+        return (true, partnerId);
+    }
 }

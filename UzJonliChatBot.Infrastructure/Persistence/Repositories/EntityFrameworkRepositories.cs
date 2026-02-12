@@ -248,7 +248,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         await strategy.ExecuteAsync(async () =>
         {
             using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.Serializable);
+                System.Data.IsolationLevel.RepeatableRead);
             try
             {
                 // Check again within the transaction to prevent race conditions
@@ -284,7 +284,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         {
             // Use Serializable to prevent concurrent dequeue issues
             using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.Serializable);
+                System.Data.IsolationLevel.RepeatableRead);
             try
             {
                 // OPTIMIZED: Load only the TelegramId through a JOIN, not the entire User entity

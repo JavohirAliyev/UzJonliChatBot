@@ -12,9 +12,9 @@ public class RegistrationService : IRegistrationService
         _userRepository = userRepository;
     }
 
-    public UserRegistrationStatus GetRegistrationStatus(long userId)
+    public async Task<UserRegistrationStatus> GetRegistrationStatus(long userId)
     {
-        var user = _userRepository.GetByTelegramIdAsync(userId).Result;
+        var user = await _userRepository.GetByTelegramIdAsync(userId);
         return user?.RegistrationStatus ?? UserRegistrationStatus.NotStarted;
     }
 
@@ -78,14 +78,14 @@ public class RegistrationService : IRegistrationService
         await _userRepository.AddOrUpdateAsync(user);
     }
 
-    public User? GetUser(long userId)
+    public async Task<User?> GetUser(long userId)
     {
-        return _userRepository.GetByTelegramIdAsync(userId).Result;
+        return await _userRepository.GetByTelegramIdAsync(userId);
     }
 
-    public bool IsRegistered(long userId)
+    public async Task<bool> IsRegistered(long userId)
     {
-        var user = _userRepository.GetByTelegramIdAsync(userId).Result;
+        var user = await _userRepository.GetByTelegramIdAsync(userId);
         return user != null && user.RegistrationStatus == UserRegistrationStatus.Registered && user.IsAgeVerified;
     }
 }

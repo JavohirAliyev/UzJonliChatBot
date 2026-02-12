@@ -43,6 +43,8 @@ public static class BotMessages
     public const string ChatEnded = "👋 Suhbat tugatildi.\n\n" +
         "Yangi suhbat uchun /keyingi tugmasini bosing.";
 
+    public const string ChatEndedWithSearching = "👋 Suhbat tugatildi.\n\n";
+
     public const string SearchStopped = "⏹️ Qidiruv to'xtatildi. \n\n" +
         "Yangi suhbat uchun /keyingi tugmasini bosing.";
 

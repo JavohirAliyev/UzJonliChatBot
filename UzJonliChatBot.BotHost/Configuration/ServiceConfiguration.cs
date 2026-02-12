@@ -67,7 +67,7 @@ public static class ServiceConfiguration
                 "set environment variable 'ConnectionStrings__DefaultConnection'.");
         }
 
-        services.AddDbContext<ChatBotDbContext>(options =>
+        services.AddDbContextFactory<ChatBotDbContext>(options =>
             options.UseNpgsql(connectionString, npgsqlOptions =>
             {
                 // Retry policy for transient failures
@@ -80,8 +80,7 @@ public static class ServiceConfiguration
                 npgsqlOptions.CommandTimeout(30);
             })
             .EnableSensitiveDataLogging(false)
-            .EnableDetailedErrors(false))
-            .AddDbContextFactory<ChatBotDbContext>();
+            .EnableDetailedErrors(false));
 
         logger.LogInformation("Registered ChatBotDbContext with Npgsql and optimized connection pooling (min: 10, max: 30)");
     }

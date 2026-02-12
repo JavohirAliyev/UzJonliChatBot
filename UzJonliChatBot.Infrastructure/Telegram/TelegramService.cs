@@ -12,19 +12,16 @@ namespace UzJonliChatBot.Infrastructure.Telegram;
 public class TelegramService : IHostedService, IDisposable
 {
     private readonly ITelegramBotClient _botClient;
-    private readonly TelegramUpdateHandler _updateHandler;
     private readonly ILogger<TelegramService> _logger;
     private readonly IConfiguration _configuration;
     private readonly HttpClient _httpClient;
 
     public TelegramService(
         ITelegramBotClient botClient,
-        TelegramUpdateHandler updateHandler,
         ILogger<TelegramService> logger,
         IConfiguration configuration)
     {
         _botClient = botClient;
-        _updateHandler = updateHandler;
         _logger = logger;
         _configuration = configuration;
         _httpClient = new HttpClient();
