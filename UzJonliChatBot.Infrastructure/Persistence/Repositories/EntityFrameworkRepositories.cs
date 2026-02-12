@@ -148,13 +148,31 @@ public class ChatRepository : IChatRepository
 
     public async Task<Chat?> GetActiveChatAsync(long telegramId)
     {
-        // OPTIMIZED: Single query using navigation property instead of two separate queries
-        var entity = await _context.ActiveChats
-            .Include(c => c.User1)
-            .Include(c => c.User2)
-            .FirstOrDefaultAsync(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId);
+        // OPTIMIZED: Only select IDs/TelegramIds to avoid loading full User entities
+        var chat = await _context.ActiveChats
+            .Where(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId)
+            .Select(c => new
+            {
+                c.Id,
+                c.User1Id,
+                c.User2Id,
+                User1Telegram = c.User1.TelegramId,
+                User2Telegram = c.User2.TelegramId,
+                c.StartedAt
+            })
+            .FirstOrDefaultAsync();
 
-        return entity == null ? null : MapToModel(entity);
+        if (chat == null)
+            return null;
+
+        // Map selected fields into Chat model (using TelegramIds as User1Id/User2Id)
+        return new Chat
+        {
+            Id = chat.Id,
+            User1Id = chat.User1Telegram,
+            User2Id = chat.User2Telegram,
+            StartedAt = chat.StartedAt
+        };
     }
 
     public async Task AddAsync(Chat chat)
@@ -234,92 +252,73 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task EnqueueAsync(long userId)
     {
-        // userId is actually TelegramId - find the actual UserEntity.Id
-        var user = await _context.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.TelegramId == userId);
-
-        if (user == null)
-            throw new InvalidOperationException($"User with Telegram ID {userId} does not exist. User must be registered first.");
-
-        // Use a transaction to prevent race conditions
-        var strategy = _context.Database.CreateExecutionStrategy();
-
-        await strategy.ExecuteAsync(async () =>
+        // ✅ SINGLE transaction, no retry strategy for simple write
+        using var transaction = await _context.Database.BeginTransactionAsync();
+        try
         {
-            using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.RepeatableRead);
-            try
+            // ✅ Check if user exists AND not in queue in ONE query
+            var user = await _context.Users
+                .Where(u => u.TelegramId == userId)
+                .Select(u => new { u.Id, InQueue = u.QueueEntry != null })
+                .FirstOrDefaultAsync();
+
+            if (user == null)
+                throw new InvalidOperationException($"User {userId} not found");
+
+            if (user.InQueue)
             {
-                // Check again within the transaction to prevent race conditions
-                var existingEntry = await _context.MatchmakingQueue
-                    .FirstOrDefaultAsync(q => q.UserId == user.Id);
-
-                if (existingEntry == null)
-                {
-                    _context.MatchmakingQueue.Add(new MatchmakingQueueEntity
-                    {
-                        UserId = user.Id,
-                        QueuedAt = DateTime.UtcNow
-                    });
-                    await _context.SaveChangesAsync();
-                }
-
                 await transaction.CommitAsync();
+                return; // Already queued, exit early
             }
-            catch (Exception)
+
+            // ✅ Add to queue
+            _context.MatchmakingQueue.Add(new MatchmakingQueueEntity
             {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        });
+                UserId = user.Id,
+                QueuedAt = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch (Exception)
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     public async Task<long?> DequeueAsync()
     {
-        // Use execution strategy to wrap the transaction - required with PostgreSQL retry strategy
-        var strategy = _context.Database.CreateExecutionStrategy();
-
-        return await strategy.ExecuteAsync<long?>(async () =>
+        // ✅ No ExecutionStrategy for read-only queue dequeue
+        using var transaction = await _context.Database.BeginTransactionAsync(
+            System.Data.IsolationLevel.RepeatableRead);
+        try
         {
-            // Use Serializable to prevent concurrent dequeue issues
-            using var transaction = await _context.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.RepeatableRead);
-            try
+            // ✅ SINGLE QUERY: Select and delete atomically
+            var entry = await _context.MatchmakingQueue
+                .OrderBy(q => q.QueuedAt)
+                .Select(q => new { q.Id, q.User.TelegramId })
+                .FirstOrDefaultAsync();
+
+            if (entry == null)
             {
-                // OPTIMIZED: Load only the TelegramId through a JOIN, not the entire User entity
-                var entry = await _context.MatchmakingQueue
-                    .OrderBy(q => q.QueuedAt)
-                    .Select(q => new
-                    {
-                        QueueId = q.Id,
-                        TelegramId = q.User.TelegramId
-                    })
-                    .FirstOrDefaultAsync();
-
-                if (entry == null)
-                {
-                    await transaction.CommitAsync();
-                    return null;
-                }
-
-                // Remove the entry atomically within the transaction
-                var queueEntity = await _context.MatchmakingQueue.FindAsync(entry.QueueId);
-                if (queueEntity != null)
-                {
-                    _context.MatchmakingQueue.Remove(queueEntity);
-                    await _context.SaveChangesAsync();
-                }
                 await transaction.CommitAsync();
+                return null;
+            }
 
-                return entry.TelegramId;
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-        });
+            // ✅ Delete directly without re-fetching
+            await _context.Database.ExecuteSqlInterpolatedAsync(
+                $"DELETE FROM \"MatchmakingQueue\" WHERE \"Id\" = {entry.Id}");
+
+            await transaction.CommitAsync();
+            return entry.TelegramId;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     public async Task RemoveFromQueueAsync(long telegramId)
