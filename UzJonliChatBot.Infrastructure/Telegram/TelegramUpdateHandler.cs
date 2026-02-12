@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System;
+using System.Diagnostics;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
@@ -233,31 +235,46 @@ public class TelegramUpdateHandler
     /// </summary>
     private async Task HandleNextAsync(long userId, IRegistrationService registrationService, IMatchmakingService matchmakingService, IChatService chatService)
     {
+        var correlationId = Guid.NewGuid().ToString("N");
+        var swTotal = Stopwatch.StartNew();
+        _logger.LogInformation("HandleNextAsync started for user {UserId} CorrelationId {CorrelationId}", userId, correlationId);
+
         try
         {
             // 1. BATCH STATUS CHECK - Single query instead of 3 separate ones
+            var sw = Stopwatch.StartNew();
             var userStatus = await GetUserStatusForNextAsync(userId, registrationService, matchmakingService, chatService);
+            sw.Stop();
+            _logger.LogDebug("GetUserStatusForNextAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
 
             if (userStatus.State == UserNextState.NotRegistered)
             {
                 await _botClient.SendMessage(userId, BotMessages.NotRegistered);
+                _logger.LogInformation("HandleNextAsync finished early (NotRegistered) for user {UserId} CorrelationId {CorrelationId} totalMs {TotalMs}", userId, correlationId, swTotal.ElapsedMilliseconds);
                 return;
             }
 
             if (userStatus.State == UserNextState.InChat)
             {
                 // End current chat and notify partner in parallel
+                sw.Restart();
                 await EndCurrentChatAndNotifyPartnerAsync(userId, userStatus.PartnerId!.Value, chatService, matchmakingService);
+                sw.Stop();
+                _logger.LogDebug("EndCurrentChatAndNotifyPartnerAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
             }
 
             if (userStatus.State == UserNextState.AlreadyWaiting)
             {
                 await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
+                _logger.LogInformation("HandleNextAsync finished early (AlreadyWaiting) for user {UserId} CorrelationId {CorrelationId} totalMs {TotalMs}", userId, correlationId, swTotal.ElapsedMilliseconds);
                 return;
             }
 
             // 2. ATOMIC DEQUEUE + ENQUEUE operation
+            sw.Restart();
             var matchResult = await FindOrEnqueuePartnerAsync(userId, matchmakingService, chatService);
+            sw.Stop();
+            _logger.LogDebug("FindOrEnqueuePartnerAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs} status {Status}", userId, correlationId, sw.ElapsedMilliseconds, matchResult.Status);
 
             switch (matchResult.Status)
             {
@@ -267,17 +284,22 @@ public class TelegramUpdateHandler
 
                 case MatchStatus.PartnerFound:
                     // 3. PARALLEL MESSAGE SENDING - Send both messages at once instead of sequentially
+                    sw.Restart();
                     await NotifyMatchedUsersAsync(userId, matchResult.PartnerId!.Value);
+                    sw.Stop();
+                    _logger.LogDebug("NotifyMatchedUsersAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
                     break;
 
                 case MatchStatus.Enqueued:
                     await _botClient.SendMessage(userId, BotMessages.WaitingForPartner, replyMarkup: GetSearchingKeyboard());
                     break;
             }
+
+            _logger.LogInformation("HandleNextAsync finished for user {UserId} CorrelationId {CorrelationId} totalMs {TotalMs}", userId, correlationId, swTotal.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in HandleNextAsync for user {UserId}", userId);
+            _logger.LogError(ex, "Error in HandleNextAsync for user {UserId} CorrelationId {CorrelationId}", userId, correlationId);
             await _botClient.SendMessage(userId, BotMessages.Error, replyMarkup: GetIdleKeyboard());
         }
     }
@@ -410,32 +432,63 @@ public class TelegramUpdateHandler
     /// </summary>
     private async Task HandleStopAsync(long userId, IChatService chatService, IMatchmakingService matchmakingService)
     {
+        var correlationId = Guid.NewGuid().ToString("N");
+        var swTotal = Stopwatch.StartNew();
+        _logger.LogInformation("HandleStopAsync started for user {UserId} CorrelationId {CorrelationId}", userId, correlationId);
+
+        var sw = Stopwatch.StartNew();
         // Check if user is in an active chat
         if (await chatService.IsInChatAsync(userId))
         {
+            sw.Stop();
+            _logger.LogDebug("IsInChatAsync returned true for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
+
+            sw.Restart();
             var partnerId = await chatService.GetPartnerAsync(userId);
+            sw.Stop();
+            _logger.LogDebug("GetPartnerAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
+
+            sw.Restart();
             await chatService.EndChatAsync(userId);
+            sw.Stop();
+            _logger.LogDebug("EndChatAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
 
             await _botClient.SendMessage(userId, BotMessages.ChatEnded, replyMarkup: GetIdleKeyboard());
 
             if (partnerId.HasValue)
             {
+                sw.Restart();
                 var partnerKeyboard = await GetKeyboardAsync(partnerId.Value, chatService, matchmakingService);
+                sw.Stop();
+                _logger.LogDebug("GetKeyboardAsync for partner {PartnerId} completed CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", partnerId.Value, correlationId, sw.ElapsedMilliseconds);
                 await _botClient.SendMessage(partnerId.Value, BotMessages.PartnerLeft, replyMarkup: partnerKeyboard);
             }
+
+            _logger.LogInformation("HandleStopAsync finished for user {UserId} CorrelationId {CorrelationId} totalMs {TotalMs}", userId, correlationId, swTotal.ElapsedMilliseconds);
             return;
         }
 
         // Check if user is waiting in the matchmaking queue
+        sw.Restart();
         if (await matchmakingService.IsWaitingAsync(userId))
         {
+            sw.Stop();
+            _logger.LogDebug("IsWaitingAsync returned true for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
+
+            sw.Restart();
             await matchmakingService.RemoveFromQueueAsync(userId);
+            sw.Stop();
+            _logger.LogDebug("RemoveFromQueueAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs}", userId, correlationId, sw.ElapsedMilliseconds);
+
             await _botClient.SendMessage(userId, BotMessages.SearchStopped, replyMarkup: GetIdleKeyboard());
+            _logger.LogInformation("HandleStopAsync finished for user {UserId} CorrelationId {CorrelationId} totalMs {TotalMs}", userId, correlationId, swTotal.ElapsedMilliseconds);
             return;
         }
 
+        sw.Stop();
         // User is neither in chat nor in queue
         await _botClient.SendMessage(userId, BotMessages.NotInChat, replyMarkup: GetIdleKeyboard());
+        _logger.LogInformation("HandleStopAsync finished (NotInChat) for user {UserId} CorrelationId {CorrelationId} totalMs {TotalMs}", userId, correlationId, swTotal.ElapsedMilliseconds);
     }
 
     /// <summary>
