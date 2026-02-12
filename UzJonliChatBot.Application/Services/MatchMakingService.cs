@@ -2,9 +2,6 @@ namespace UzJonliChatBot.Application.Services;
 
 using UzJonliChatBot.Application.Interfaces;
 
-/// <summary>
-/// Service for managing the user matchmaking queue.
-/// </summary>
 public class MatchmakingService : IMatchmakingService
 {
     private readonly IMatchmakingQueueRepository _queueRepository;

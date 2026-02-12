@@ -4,17 +4,12 @@ using Microsoft.Extensions.Configuration;
 
 namespace UzJonliChatBot.Infrastructure.Persistence;
 
-/// <summary>
-/// Design-time DbContext factory for migrations.
-/// Used by dotnet ef commands without requiring the application to run.
-/// </summary>
 public class ChatBotDbContextFactory : IDesignTimeDbContextFactory<ChatBotDbContext>
 {
     public ChatBotDbContext CreateDbContext(string[] args)
     {
         var basePath = Directory.GetCurrentDirectory();
-        
-        // Navigate to BotHost directory if running from Infrastructure
+
         if (!File.Exists(Path.Combine(basePath, "appSettings.Development.json")))
         {
             basePath = Path.Combine(basePath, "..", "UzJonliChatBot.BotHost");

@@ -9,9 +9,6 @@ using UzJonliChatBot.Application.Models;
 
 namespace UzJonliChatBot.Application.Services;
 
-/// <summary>
-/// Service for admin authentication and authorization.
-/// </summary>
 public class AdminService : IAdminService
 {
     private readonly IAdminRepository _adminRepository;
@@ -64,7 +61,7 @@ public class AdminService : IAdminService
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(_jwtSecret);
-            
+
             tokenHandler.ValidateToken(token, new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
@@ -89,7 +86,7 @@ public class AdminService : IAdminService
     {
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(_jwtSecret);
-        
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(new[]
@@ -112,7 +109,6 @@ public class AdminService : IAdminService
 
     private static string HashPassword(string password)
     {
-        // Use PBKDF2 for secure password hashing
         using var rng = RandomNumberGenerator.Create();
         var salt = new byte[16];
         rng.GetBytes(salt);
@@ -130,7 +126,7 @@ public class AdminService : IAdminService
     private static bool VerifyPassword(string password, string storedHash)
     {
         var hashBytes = Convert.FromBase64String(storedHash);
-        
+
         var salt = new byte[16];
         Array.Copy(hashBytes, 0, salt, 0, 16);
 

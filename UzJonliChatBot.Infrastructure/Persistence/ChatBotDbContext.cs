@@ -3,9 +3,6 @@ using UzJonliChatBot.Infrastructure.Persistence.Entities;
 
 namespace UzJonliChatBot.Infrastructure.Persistence;
 
-/// <summary>
-/// Database context for UzJonliChatBot.
-/// </summary>
 public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbContext(options)
 {
     public DbSet<AdminEntity> Admins { get; set; } = null!;
@@ -17,24 +14,22 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
     {
         base.OnModelCreating(modelBuilder);
 
-        // Admins table configuration
         modelBuilder.Entity<AdminEntity>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Username).IsUnique();
-            
+
             entity.Property(e => e.Username).IsRequired().HasMaxLength(100);
             entity.Property(e => e.PasswordHash).IsRequired().HasMaxLength(500);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.LastLoginAt);
         });
 
-        // Users table configuration
         modelBuilder.Entity<UserEntity>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.TelegramId).IsUnique();
-            
+
             entity.Property(e => e.TelegramId).IsRequired();
             entity.Property(e => e.FullName).HasMaxLength(200);
             entity.Property(e => e.Username).HasMaxLength(100);
@@ -61,12 +56,11 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // ActiveChats table configuration
         modelBuilder.Entity<ActiveChatEntity>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.User1Id, e.User2Id }).IsUnique();
-            
+
             entity.Property(e => e.User1Id).IsRequired();
             entity.Property(e => e.User2Id).IsRequired();
             entity.Property(e => e.StartedAt).IsRequired();
@@ -82,12 +76,11 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // MatchmakingQueue table configuration
         modelBuilder.Entity<MatchmakingQueueEntity>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.UserId).IsUnique();
-            
+
             entity.Property(e => e.UserId).IsRequired();
             entity.Property(e => e.QueuedAt).IsRequired();
 

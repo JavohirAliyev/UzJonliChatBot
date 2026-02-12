@@ -3,10 +3,6 @@ using UzJonliChatBot.Application.Models;
 
 namespace UzJonliChatBot.Application.Services;
 
-/// <summary>
-/// Service for managing user registration and verification.
-/// Handles gender selection and age confirmation.
-/// </summary>
 public class RegistrationService : IRegistrationService
 {
     private readonly IUserRepository _userRepository;

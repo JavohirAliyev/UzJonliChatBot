@@ -7,43 +7,32 @@ using UzJonliChatBot.Infrastructure.Telegram;
 
 namespace UzJonliChatBot.BotHost.Configuration;
 
-/// <summary>
-/// Configuration for application services.
-/// </summary>
 public static class ServiceConfiguration
 {
-    /// <summary>
-    /// Registers all application services.
-    /// </summary>
     public static IServiceCollection AddApplicationServices(
         this IServiceCollection services,
         IConfiguration configuration,
         ILogger logger)
     {
-        // Register DbContext
         ConfigureDatabase(services, configuration, logger);
 
-        // Register repositories
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IChatRepository, ChatRepository>();
         services.AddScoped<IMatchmakingQueueRepository, MatchmakingQueueRepository>();
         services.AddScoped<IAdminRepository, AdminRepository>();
         logger.LogInformation("Registered repositories");
 
-        // Register application services
         services.AddScoped<IRegistrationService, RegistrationService>();
         services.AddScoped<IMatchmakingService, MatchmakingService>();
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<IAdminService, AdminService>();
         logger.LogInformation("Registered application services");
 
-        // Register Telegram services
         var botClient = TelegramBotClientFactory.Create(configuration);
         services.AddSingleton(botClient);
         services.AddSingleton<TelegramUpdateHandler>();
         logger.LogInformation("Registered Telegram infrastructure services");
 
-        // Register hosted services
         services.AddHostedService<TelegramService>();
         logger.LogInformation("Registered hosted services");
 
@@ -59,7 +48,6 @@ public static class ServiceConfiguration
         logger.LogInformation("GetConnectionString returned: HasValue={HasValue}, Length={Length}",
             !string.IsNullOrWhiteSpace(connectionString), connectionString?.Length ?? 0);
 
-        // Fallback to environment variable
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection");
@@ -82,24 +70,19 @@ public static class ServiceConfiguration
         services.AddDbContext<ChatBotDbContext>(options =>
             options.UseNpgsql(connectionString, npgsqlOptions =>
             {
-                // Enable retry logic for transient failures
+                // Retry policy for transient failures
                 npgsqlOptions.EnableRetryOnFailure(
                     maxRetryCount: 3,
                     maxRetryDelay: TimeSpan.FromSeconds(5),
                     errorCodesToAdd: null);
 
-                // Set command timeout
+                // Command timeout for long-running queries
                 npgsqlOptions.CommandTimeout(30);
-
-                // Connection pooling is configured automatically by default
-                // Further optimization through connection string tuning if needed:
-                // "Enlist=false;Max Pool Size=100;Min Pool Size=10;"
             })
             .EnableSensitiveDataLogging(false)
             .EnableDetailedErrors(false))
-            // Context pooling for improved performance in high-throughput scenarios
             .AddDbContextFactory<ChatBotDbContext>();
 
-        logger.LogInformation("Registered ChatBotDbContext with Npgsql and optimized connection pooling");
+        logger.LogInformation("Registered ChatBotDbContext with Npgsql and optimized connection pooling (min: 10, max: 30)");
     }
 }

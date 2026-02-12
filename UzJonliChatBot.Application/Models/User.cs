@@ -1,29 +1,19 @@
 namespace UzJonliChatBot.Application.Models;
 
-/// <summary>
-/// Gender enum for user classification.
-/// </summary>
 public enum Gender
 {
     Male,
     Female
 }
 
-/// <summary>
-/// User registration status in the system.
-/// </summary>
 public enum UserRegistrationStatus
 {
-    NotStarted,           // User hasn't started registration
-    GenderPending,        // Waiting for gender selection
-    AgeVerificationPending, // Waiting for age confirmation
-    Registered            // User is fully registered
+    NotStarted,
+    GenderPending,
+    AgeVerificationPending,
+    Registered
 }
 
-/// <summary>
-/// Represents a Telegram user in the chat system.
-/// Stores user gender for future search filtering.
-/// </summary>
 public class User
 {
     public long TelegramId { get; set; }
@@ -38,7 +28,7 @@ public class User
 
     public User()
     {
-        Gender = Gender.Male; // Default to Male
+        Gender = Gender.Male;
         RegistrationStatus = UserRegistrationStatus.NotStarted;
         IsAgeVerified = false;
         IsBanned = false;

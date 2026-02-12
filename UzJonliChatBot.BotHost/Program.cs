@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.FileProviders;
 using Telegram.Bot.Types;
-using UzJonliChatBot.Application.Interfaces;
 using UzJonliChatBot.BotHost.Api;
 using UzJonliChatBot.BotHost.Configuration;
 using UzJonliChatBot.Infrastructure.Persistence;
@@ -15,12 +14,10 @@ public class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        // Setup logging
         using var loggerFactory = LoggerFactory.Create(loggingBuilder => loggingBuilder.AddConsole());
         var logger = loggerFactory.CreateLogger<Program>();
         logger.LogInformation("Building application...");
 
-        // Configure services
         builder.Services.AddApplicationServices(builder.Configuration, logger);
         builder.Services.AddJwtAuthentication(builder.Configuration);
 
@@ -29,13 +26,10 @@ public class Program
         logger = app.Services.GetRequiredService<ILogger<Program>>();
         logger.LogInformation("Application built. Initializing database...");
 
-        // Initialize database
         await InitializeDatabaseAsync(app, logger);
 
-        // Configure middleware pipeline
         ConfigureMiddleware(app);
 
-        // Map endpoints
         MapEndpoints(app, logger);
 
         logger.LogInformation("Starting web application...");
@@ -62,7 +56,6 @@ public class Program
 
     private static void ConfigureMiddleware(WebApplication app)
     {
-        // Enable static files for admin dashboard
         app.UseStaticFiles(new StaticFileOptions
         {
             FileProvider = new PhysicalFileProvider(
@@ -70,13 +63,11 @@ public class Program
             RequestPath = ""
         });
 
-        // Authentication & Authorization
         app.UseAuthenticationAndAuthorization();
     }
 
     private static void MapEndpoints(WebApplication app, ILogger logger)
     {
-        // Webhook endpoint for Telegram bot
         app.MapPost("/webhook", async (
             HttpContext context,
             TelegramUpdateHandler updateHandler,
@@ -104,7 +95,6 @@ public class Program
                     return Results.BadRequest("Invalid update format");
                 }
 
-                // Process update asynchronously
                 _ = Task.Run(async () =>
                 {
                     try
@@ -126,17 +116,14 @@ public class Program
             }
         });
 
-        // Health check endpoint
         app.MapGet("/health", () => Results.Ok(new
         {
             status = "healthy",
             timestamp = DateTime.UtcNow
         }));
 
-        // Admin API endpoints
         app.MapAdminEndpoints();
 
-        // Admin dashboard route - redirect root to index.html
         app.MapGet("/admin", () => Results.Redirect("/admin/index.html"));
 
         logger.LogInformation("Endpoints mapped successfully");

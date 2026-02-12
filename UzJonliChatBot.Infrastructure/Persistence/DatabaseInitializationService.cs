@@ -6,19 +6,12 @@ using UzJonliChatBot.Infrastructure.Persistence.Entities;
 
 namespace UzJonliChatBot.Infrastructure.Persistence;
 
-/// <summary>
-/// Service for initializing the database (migrations, etc).
-/// </summary>
 public static class DatabaseInitializationService
 {
-    /// <summary>
-    /// Initializes the database by applying pending migrations and creating initial admin.
-    /// </summary>
     public static async Task InitializeAsync(ChatBotDbContext context, IConfiguration? configuration = null)
     {
         try
         {
-            // Apply pending migrations
             if ((await context.Database.GetPendingMigrationsAsync()).Any())
             {
                 await context.Database.MigrateAsync();
@@ -29,7 +22,6 @@ public static class DatabaseInitializationService
                 Console.WriteLine("Database is up to date.");
             }
 
-            // Initialize admin if not exists
             await InitializeAdminAsync(context, configuration);
         }
         catch (Exception ex)
@@ -39,9 +31,6 @@ public static class DatabaseInitializationService
         }
     }
 
-    /// <summary>
-    /// Creates initial admin account if no admin exists.
-    /// </summary>
     private static async Task InitializeAdminAsync(ChatBotDbContext context, IConfiguration? configuration)
     {
         if (await context.Admins.AnyAsync())
@@ -50,7 +39,6 @@ public static class DatabaseInitializationService
             return;
         }
 
-        // Get admin credentials from configuration or use defaults
         var username = configuration?["Admin:Username"] ?? "admin";
         var password = configuration?["Admin:Password"] ?? "Admin123!";
 
@@ -72,7 +60,6 @@ public static class DatabaseInitializationService
 
     private static string HashPassword(string password)
     {
-        // Use PBKDF2 for secure password hashing
         using var rng = RandomNumberGenerator.Create();
         var salt = new byte[16];
         rng.GetBytes(salt);

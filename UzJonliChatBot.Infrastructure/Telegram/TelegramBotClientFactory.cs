@@ -3,9 +3,6 @@ using Telegram.Bot;
 
 namespace UzJonliChatBot.Infrastructure.Telegram;
 
-/// <summary>
-/// Factory for creating TelegramBotClient instances.
-/// </summary>
 public static class TelegramBotClientFactory
 {
     public static ITelegramBotClient Create(IConfiguration configuration)

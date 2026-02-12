@@ -37,13 +37,14 @@ public static class BotMessages
         "Yangi suhbat uchun /keyingi tugmasini bosing.";
 
     public const string WaitingForPartner = "⏳ Suhbatdosh qidirilmoqda...\n\n" +
-        "Iltimos kuting 😊\n\n" + 
+        "Iltimos kuting 😊\n\n" +
         "Qidiruvni to'xtatish uchun /stop tugmasini bosing.";
 
     public const string ChatEnded = "👋 Suhbat tugatildi.\n\n" +
         "Yangi suhbat uchun /keyingi tugmasini bosing.";
 
-    public const string SearchStopped = "⏹️ Qidiruv to'xtatildi.";
+    public const string SearchStopped = "⏹️ Qidiruv to'xtatildi. \n\n" +
+        "Yangi suhbat uchun /keyingi tugmasini bosing.";
 
     public const string AlreadyInChat = "💬 Siz allaqachon suhbatdasiz!\n\n" +
         "Suhbatni tugatish uchun /stop tugmasini bosing.\n\n" +

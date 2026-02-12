@@ -148,29 +148,25 @@ public class ChatRepository : IChatRepository
 
     public async Task<Chat?> GetActiveChatAsync(long telegramId)
     {
-        // Convert Telegram ID to database User ID
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
-
-        if (user == null)
-            return null;
-
-        // Query using database User ID
+        // OPTIMIZED: Single query using navigation property instead of two separate queries
         var entity = await _context.ActiveChats
             .Include(c => c.User1)
             .Include(c => c.User2)
-            .FirstOrDefaultAsync(c => c.User1Id == user.Id || c.User2Id == user.Id);
+            .FirstOrDefaultAsync(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId);
 
         return entity == null ? null : MapToModel(entity);
     }
 
     public async Task AddAsync(Chat chat)
     {
-        // chat.User1Id and chat.User2Id are Telegram IDs - convert to database User IDs
-        var user1 = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == chat.User1Id);
-        var user2 = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == chat.User2Id);
+        // OPTIMIZED: Use parameterized query to find both users in one efficient operation
+        var users = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.TelegramId == chat.User1Id || u.TelegramId == chat.User2Id)
+            .ToListAsync();
+
+        var user1 = users.FirstOrDefault(u => u.TelegramId == chat.User1Id);
+        var user2 = users.FirstOrDefault(u => u.TelegramId == chat.User2Id);
 
         if (user1 == null)
             throw new InvalidOperationException($"User with Telegram ID {chat.User1Id} does not exist. User must be registered first.");
@@ -190,17 +186,11 @@ public class ChatRepository : IChatRepository
 
     public async Task RemoveAsync(Chat chat)
     {
-        // chat.User1Id and chat.User2Id are Telegram IDs - convert to database User IDs
-        var user1 = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == chat.User1Id);
-        var user2 = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == chat.User2Id);
-
-        if (user1 == null || user2 == null)
-            return;
-
+        // OPTIMIZED: Single query using TelegramId directly
         var entity = await _context.ActiveChats
-            .FirstOrDefaultAsync(c => c.User1Id == user1.Id && c.User2Id == user2.Id);
+            .FirstOrDefaultAsync(c =>
+                (c.User1.TelegramId == chat.User1Id && c.User2.TelegramId == chat.User2Id) ||
+                (c.User1.TelegramId == chat.User2Id && c.User2.TelegramId == chat.User1Id));
 
         if (entity != null)
         {
@@ -211,16 +201,10 @@ public class ChatRepository : IChatRepository
 
     public async Task<bool> IsInChatAsync(long telegramId)
     {
-        // Convert Telegram ID to database User ID
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
-
-        if (user == null)
-            return false;
-
-        // Query using database User ID
+        // OPTIMIZED: Single query with proper JOIN - no intermediate lookup
         return await _context.ActiveChats
-            .AnyAsync(c => c.User1Id == user.Id || c.User2Id == user.Id);
+            .AsNoTracking()
+            .AnyAsync(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId);
     }
 
     private static Chat MapToModel(ActiveChatEntity entity)
@@ -252,6 +236,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
     {
         // userId is actually TelegramId - find the actual UserEntity.Id
         var user = await _context.Users
+            .AsNoTracking()
             .FirstOrDefaultAsync(u => u.TelegramId == userId);
 
         if (user == null)
@@ -302,10 +287,14 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
                 System.Data.IsolationLevel.Serializable);
             try
             {
-                // Get the first entry ordered by queue time with the user's TelegramId
+                // OPTIMIZED: Load only the TelegramId through a JOIN, not the entire User entity
                 var entry = await _context.MatchmakingQueue
-                    .Include(q => q.User)
                     .OrderBy(q => q.QueuedAt)
+                    .Select(q => new
+                    {
+                        QueueId = q.Id,
+                        TelegramId = q.User.TelegramId
+                    })
                     .FirstOrDefaultAsync();
 
                 if (entry == null)
@@ -314,14 +303,16 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
                     return null;
                 }
 
-                var telegramId = entry.User.TelegramId;
-
                 // Remove the entry atomically within the transaction
-                _context.MatchmakingQueue.Remove(entry);
-                await _context.SaveChangesAsync();
+                var queueEntity = await _context.MatchmakingQueue.FindAsync(entry.QueueId);
+                if (queueEntity != null)
+                {
+                    _context.MatchmakingQueue.Remove(queueEntity);
+                    await _context.SaveChangesAsync();
+                }
                 await transaction.CommitAsync();
 
-                return telegramId;
+                return entry.TelegramId;
             }
             catch
             {
@@ -342,16 +333,10 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
                 System.Data.IsolationLevel.RepeatableRead);
             try
             {
-                // Use a single query to find and remove
-                var entry = await _context.MatchmakingQueue
-                    .Where(q => q.User.TelegramId == telegramId)
-                    .FirstOrDefaultAsync();
-
-                if (entry != null)
-                {
-                    _context.MatchmakingQueue.Remove(entry);
-                    await _context.SaveChangesAsync();
-                }
+                // OPTIMIZED: Single delete operation with parameterized SQL
+                await _context.Database.ExecuteSqlInterpolatedAsync(
+                    $@"DELETE FROM ""MatchmakingQueue"" 
+                      WHERE ""UserId"" = (SELECT ""Id"" FROM ""Users"" WHERE ""TelegramId"" = {telegramId})");
 
                 await transaction.CommitAsync();
             }

@@ -3,9 +3,6 @@ namespace UzJonliChatBot.Application.Services;
 using UzJonliChatBot.Application.Interfaces;
 using UzJonliChatBot.Application.Models;
 
-/// <summary>
-/// Service for managing active chats between users.
-/// </summary>
 public class ChatService : IChatService
 {
     private readonly IChatRepository _chatRepository;

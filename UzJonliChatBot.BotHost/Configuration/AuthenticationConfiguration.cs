@@ -4,14 +4,8 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace UzJonliChatBot.BotHost.Configuration;
 
-/// <summary>
-/// Configuration for authentication and authorization.
-/// </summary>
 public static class AuthenticationConfiguration
 {
-    /// <summary>
-    /// Configures JWT authentication and authorization.
-    /// </summary>
     public static IServiceCollection AddJwtAuthentication(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -53,9 +47,6 @@ public static class AuthenticationConfiguration
         return services;
     }
 
-    /// <summary>
-    /// Adds authentication and authorization middleware to the pipeline.
-    /// </summary>
     public static WebApplication UseAuthenticationAndAuthorization(this WebApplication app)
     {
         app.UseAuthentication();
