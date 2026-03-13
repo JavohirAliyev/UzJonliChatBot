@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Telegram.Bot.Types;
 using UzJonliChatBot.BotHost.Api;
@@ -42,7 +43,8 @@ public class Program
         try
         {
             logger.LogInformation("Starting database initialization...");
-            var dbContext = scope.ServiceProvider.GetRequiredService<ChatBotDbContext>();
+            var dbContextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<ChatBotDbContext>>();
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync();
             var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
             await DatabaseInitializationService.InitializeAsync(dbContext, configuration);
             logger.LogInformation("Database initialization completed successfully");

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Telegram.Bot;
 using Telegram.Bot.Types;
@@ -21,6 +22,7 @@ public class TelegramUpdateHandler
     private readonly IServiceProvider _serviceProvider;
     private readonly ITelegramBotClient _botClient;
     private readonly ILogger<TelegramUpdateHandler> _logger;
+    private readonly ConcurrentDictionary<long, SemaphoreSlim> _userLocks = new();
 
     public TelegramUpdateHandler(
         IServiceProvider serviceProvider,
@@ -37,8 +39,17 @@ public class TelegramUpdateHandler
     /// </summary>
     public async Task HandleUpdateAsync(Update update)
     {
+        var userId = GetUserId(update);
+        SemaphoreSlim? userLock = null;
+
         try
         {
+            if (userId.HasValue)
+            {
+                userLock = _userLocks.GetOrAdd(userId.Value, _ => new SemaphoreSlim(1, 1));
+                await userLock.WaitAsync();
+            }
+
             // Create a scope for this update to resolve scoped services
             using var scope = _serviceProvider.CreateScope();
 
@@ -56,6 +67,28 @@ public class TelegramUpdateHandler
             _logger.LogError(ex, "Error handling update {UpdateId} from user {UserId}",
                 update.Id, update.Message?.Chat.Id ?? update.CallbackQuery?.From.Id ?? 0);
         }
+        finally
+        {
+            if (userLock != null)
+            {
+                userLock.Release();
+            }
+        }
+    }
+
+    private static long? GetUserId(Update update)
+    {
+        if (update.Message != null)
+        {
+            return update.Message.Chat.Id;
+        }
+
+        if (update.CallbackQuery != null)
+        {
+            return update.CallbackQuery.From.Id;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -147,25 +180,6 @@ public class TelegramUpdateHandler
 
         if (status == UserRegistrationStatus.Registered)
         {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var chat = await _botClient.GetChat(userId);
-                    var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
-                    var username = chat.Username;
-
-                    if (!string.IsNullOrEmpty(fullName) || !string.IsNullOrEmpty(username))
-                    {
-                        await registrationService.SetUserInfoAsync(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Could not update user info for user {UserId}", userId);
-                }
-            });
-
             await HandleStartAsync(userId);
             return;
         }
@@ -631,28 +645,6 @@ public class TelegramUpdateHandler
             await _botClient.SendMessage(userId, BotMessages.Error);
             return;
         }
-
-        // Silently update user info from Telegram to keep data fresh
-        // This happens in the background and doesn't affect the user experience
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var chat = await _botClient.GetChat(userId);
-                var fullName = $"{chat.FirstName ?? ""} {chat.LastName ?? ""}".Trim();
-                var username = chat.Username;
-
-                // Update if there's any new info
-                if (!string.IsNullOrEmpty(fullName) || !string.IsNullOrEmpty(username))
-                {
-                    await registrationService.SetUserInfoAsync(userId, string.IsNullOrEmpty(fullName) ? null : fullName, username);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not update user info for user {UserId}", userId);
-            }
-        });
 
         var genderText = user!.Gender == Gender.Male ? "👨 Erkak" : "👩 Ayol";
 

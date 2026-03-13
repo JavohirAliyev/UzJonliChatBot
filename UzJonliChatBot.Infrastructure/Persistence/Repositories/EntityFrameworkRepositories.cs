@@ -12,16 +12,18 @@ namespace UzJonliChatBot.Infrastructure.Persistence.Repositories;
 /// </summary>
 public class UserRepository : IUserRepository
 {
-    private readonly ChatBotDbContext _context;
+    private readonly IDbContextFactory<ChatBotDbContext> _contextFactory;
 
-    public UserRepository(ChatBotDbContext context)
+    public UserRepository(IDbContextFactory<ChatBotDbContext> contextFactory)
     {
-        _context = context;
+        _contextFactory = contextFactory;
     }
 
     public async Task<User?> GetByTelegramIdAsync(long telegramId)
     {
-        var entity = await _context.Users
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entity = await context.Users
             .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
 
         return entity == null ? null : MapToModel(entity);
@@ -29,7 +31,9 @@ public class UserRepository : IUserRepository
 
     public async Task AddOrUpdateAsync(User user)
     {
-        var entity = await _context.Users
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entity = await context.Users
             .FirstOrDefaultAsync(u => u.TelegramId == user.TelegramId);
 
         if (entity == null)
@@ -39,7 +43,7 @@ public class UserRepository : IUserRepository
                 TelegramId = user.TelegramId,
                 CreatedAt = DateTime.UtcNow
             };
-            _context.Users.Add(entity);
+            context.Users.Add(entity);
         }
 
         entity.FullName = user.FullName;
@@ -50,18 +54,22 @@ public class UserRepository : IUserRepository
         entity.IsBanned = user.IsBanned;
         entity.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync();
+        await context.SaveChangesAsync();
     }
 
     public async Task<bool> ExistsAsync(long telegramId)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
         // Use AsNoTracking for read-only queries to improve performance
-        return await _context.Users.AsNoTracking().AnyAsync(u => u.TelegramId == telegramId);
+        return await context.Users.AsNoTracking().AnyAsync(u => u.TelegramId == telegramId);
     }
 
     public async Task<IEnumerable<User>> GetRegisteredUsersAsync()
     {
-        var entities = await _context.Users.AsNoTracking()
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entities = await context.Users.AsNoTracking()
             .Where(u => u.RegistrationStatus == "Registered" && u.IsAgeVerified)
             .ToListAsync();
 
@@ -70,7 +78,9 @@ public class UserRepository : IUserRepository
 
     public async Task<(IEnumerable<User> Users, int TotalCount)> GetAllUsersAsync(int page, int pageSize, string? searchTerm = null)
     {
-        var query = _context.Users.AsNoTracking();
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var query = context.Users.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
@@ -90,27 +100,31 @@ public class UserRepository : IUserRepository
 
     public async Task BanUserAsync(long telegramId)
     {
-        var entity = await _context.Users
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entity = await context.Users
             .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
 
         if (entity != null)
         {
             entity.IsBanned = true;
             entity.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
     }
 
     public async Task UnbanUserAsync(long telegramId)
     {
-        var entity = await _context.Users
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entity = await context.Users
             .FirstOrDefaultAsync(u => u.TelegramId == telegramId);
 
         if (entity != null)
         {
             entity.IsBanned = false;
             entity.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
     }
 
@@ -141,21 +155,22 @@ public class UserRepository : IUserRepository
 /// </summary>
 public class ChatRepository : IChatRepository
 {
-    private readonly ChatBotDbContext _context;
+    private readonly IDbContextFactory<ChatBotDbContext> _contextFactory;
     private readonly ILogger<ChatRepository> _logger;
-    public ChatRepository(ChatBotDbContext context, ILogger<ChatRepository> logger)
+    public ChatRepository(IDbContextFactory<ChatBotDbContext> contextFactory, ILogger<ChatRepository> logger)
     {
-        _context = context;
+        _contextFactory = contextFactory;
         _logger = logger;
     }
 
     public async Task<Chat?> GetActiveChatAsync(long telegramId)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // OPTIMIZED: Only select IDs/TelegramIds to avoid loading full User entities
-            var chat = await _context.ActiveChats
+            var chat = await context.ActiveChats
             .Where(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId)
             .Select(c => new
             {
@@ -189,11 +204,12 @@ public class ChatRepository : IChatRepository
 
     public async Task AddAsync(Chat chat)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // OPTIMIZED: Use parameterized query to find both users in one efficient operation
-            var users = await _context.Users
+            var users = await context.Users
                 .AsNoTracking()
                 .Where(u => u.TelegramId == chat.User1Id || u.TelegramId == chat.User2Id)
                 .ToListAsync();
@@ -213,8 +229,8 @@ public class ChatRepository : IChatRepository
                 StartedAt = chat.StartedAt
             };
 
-            _context.ActiveChats.Add(entity);
-            await _context.SaveChangesAsync();
+            context.ActiveChats.Add(entity);
+            await context.SaveChangesAsync();
         }
         finally
         {
@@ -225,19 +241,20 @@ public class ChatRepository : IChatRepository
 
     public async Task RemoveAsync(Chat chat)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // OPTIMIZED: Single query using TelegramId directly
-            var entity = await _context.ActiveChats
+            var entity = await context.ActiveChats
                 .FirstOrDefaultAsync(c =>
                     (c.User1.TelegramId == chat.User1Id && c.User2.TelegramId == chat.User2Id) ||
                     (c.User1.TelegramId == chat.User2Id && c.User2.TelegramId == chat.User1Id));
 
             if (entity != null)
             {
-                _context.ActiveChats.Remove(entity);
-                await _context.SaveChangesAsync();
+                context.ActiveChats.Remove(entity);
+                await context.SaveChangesAsync();
             }
         }
         finally
@@ -249,11 +266,12 @@ public class ChatRepository : IChatRepository
 
     public async Task<bool> IsInChatAsync(long telegramId)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // OPTIMIZED: Single query with proper JOIN - no intermediate lookup
-            return await _context.ActiveChats
+            return await context.ActiveChats
                 .AsNoTracking()
                 .AnyAsync(c => c.User1.TelegramId == telegramId || c.User2.TelegramId == telegramId);
         }
@@ -282,30 +300,31 @@ public class ChatRepository : IChatRepository
 /// </summary>
 public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 {
-    private readonly ChatBotDbContext _context;
+    private readonly IDbContextFactory<ChatBotDbContext> _contextFactory;
     private readonly ILogger<MatchmakingQueueRepository> _logger;
 
-    public MatchmakingQueueRepository(ChatBotDbContext context, ILogger<MatchmakingQueueRepository> logger)
+    public MatchmakingQueueRepository(IDbContextFactory<ChatBotDbContext> contextFactory, ILogger<MatchmakingQueueRepository> logger)
     {
-        _context = context;
+        _contextFactory = contextFactory;
         _logger = logger;
     }
 
     public async Task EnqueueAsync(long userId)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // Use execution strategy for writes so transactions are retriable
-            var strategy = _context.Database.CreateExecutionStrategy();
+            var strategy = context.Database.CreateExecutionStrategy();
 
             await strategy.ExecuteAsync(async () =>
             {
-                using var transaction = await _context.Database.BeginTransactionAsync();
+                using var transaction = await context.Database.BeginTransactionAsync();
                 try
                 {
                     // Check if user exists AND not in queue in ONE query
-                    var user = await _context.Users
+                    var user = await context.Users
                         .Where(u => u.TelegramId == userId)
                         .Select(u => new { u.Id, InQueue = u.QueueEntry != null })
                         .FirstOrDefaultAsync();
@@ -320,13 +339,13 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
                     }
 
                     // Add to queue
-                    _context.MatchmakingQueue.Add(new MatchmakingQueueEntity
+                    context.MatchmakingQueue.Add(new MatchmakingQueueEntity
                     {
                         UserId = user.Id,
                         QueuedAt = DateTime.UtcNow
                     });
 
-                    await _context.SaveChangesAsync();
+                    await context.SaveChangesAsync();
                     await transaction.CommitAsync();
                 }
                 catch (Exception)
@@ -345,20 +364,21 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task<long?> DequeueAsync()
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // Dequeue performs a delete, so run inside the execution strategy to support retries
-            var strategy = _context.Database.CreateExecutionStrategy();
+            var strategy = context.Database.CreateExecutionStrategy();
 
             return await strategy.ExecuteAsync<long?>(async () =>
             {
-                using var transaction = await _context.Database.BeginTransactionAsync(
+                using var transaction = await context.Database.BeginTransactionAsync(
                     System.Data.IsolationLevel.RepeatableRead);
                 try
                 {
                     // SINGLE QUERY: Select and delete atomically
-                    var entry = await _context.MatchmakingQueue
+                    var entry = await context.MatchmakingQueue
                         .OrderBy(q => q.QueuedAt)
                         .Select(q => new { q.Id, q.User.TelegramId })
                         .FirstOrDefaultAsync();
@@ -370,7 +390,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
                     }
 
                     // Delete directly without re-fetching
-                    await _context.Database.ExecuteSqlInterpolatedAsync(
+                    await context.Database.ExecuteSqlInterpolatedAsync(
                         $"DELETE FROM \"MatchmakingQueue\" WHERE \"Id\" = {entry.Id}");
 
                     await transaction.CommitAsync();
@@ -392,20 +412,21 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task RemoveFromQueueAsync(long telegramId)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // Optimize by doing this in a single transaction with proper isolation
-            var strategy = _context.Database.CreateExecutionStrategy();
+            var strategy = context.Database.CreateExecutionStrategy();
 
             await strategy.ExecuteAsync(async () =>
             {
-                using var transaction = await _context.Database.BeginTransactionAsync(
+                using var transaction = await context.Database.BeginTransactionAsync(
                     System.Data.IsolationLevel.RepeatableRead);
                 try
                 {
                     // OPTIMIZED: Single delete operation with parameterized SQL
-                    await _context.Database.ExecuteSqlInterpolatedAsync(
+                    await context.Database.ExecuteSqlInterpolatedAsync(
                         $"DELETE FROM \"MatchmakingQueue\" WHERE \"UserId\" = (SELECT \"Id\" FROM \"Users\" WHERE \"TelegramId\" = {telegramId})");
 
                     await transaction.CommitAsync();
@@ -426,11 +447,12 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 
     public async Task<bool> IsInQueueAsync(long telegramId)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
         try
         {
             // Optimized: single query without the intermediate user lookup
-            return await _context.MatchmakingQueue
+            return await context.MatchmakingQueue
                 .AnyAsync(q => q.User.TelegramId == telegramId);
         }
         finally
@@ -446,16 +468,18 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
 /// </summary>
 public class AdminRepository : IAdminRepository
 {
-    private readonly ChatBotDbContext _context;
+    private readonly IDbContextFactory<ChatBotDbContext> _contextFactory;
 
-    public AdminRepository(ChatBotDbContext context)
+    public AdminRepository(IDbContextFactory<ChatBotDbContext> contextFactory)
     {
-        _context = context;
+        _contextFactory = contextFactory;
     }
 
     public async Task<Admin?> GetByUsernameAsync(string username)
     {
-        var entity = await _context.Admins
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entity = await context.Admins
             .FirstOrDefaultAsync(a => a.Username == username);
 
         return entity == null ? null : MapToModel(entity);
@@ -463,6 +487,8 @@ public class AdminRepository : IAdminRepository
 
     public async Task AddAsync(Admin admin)
     {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
         var entity = new AdminEntity
         {
             Username = admin.Username,
@@ -470,25 +496,29 @@ public class AdminRepository : IAdminRepository
             CreatedAt = admin.CreatedAt
         };
 
-        _context.Admins.Add(entity);
-        await _context.SaveChangesAsync();
+        context.Admins.Add(entity);
+        await context.SaveChangesAsync();
 
         admin.Id = entity.Id;
     }
 
     public async Task UpdateLastLoginAsync(int adminId)
     {
-        var entity = await _context.Admins.FindAsync(adminId);
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var entity = await context.Admins.FindAsync(adminId);
         if (entity != null)
         {
             entity.LastLoginAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await context.SaveChangesAsync();
         }
     }
 
     public async Task<bool> AnyAdminExistsAsync()
     {
-        return await _context.Admins.AnyAsync();
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        return await context.Admins.AnyAsync();
     }
 
     private static Admin MapToModel(AdminEntity entity)
