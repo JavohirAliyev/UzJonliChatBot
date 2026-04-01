@@ -14,7 +14,8 @@ public static class AdminEndpoints
     public static void MapAdminEndpoints(this WebApplication app)
     {
         var adminGroup = app.MapGroup("/api/admin")
-            .WithTags("Admin");
+            .WithTags("Admin")
+            .RequireRateLimiting("admin_limit");
 
         adminGroup.MapPost("/login", LoginAsync)
             .WithName("AdminLogin");

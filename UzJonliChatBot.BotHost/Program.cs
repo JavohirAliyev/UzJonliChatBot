@@ -1,6 +1,8 @@
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.AspNetCore.RateLimiting;
 using Telegram.Bot.Types;
 using UzJonliChatBot.BotHost.Api;
 using UzJonliChatBot.BotHost.Configuration;
@@ -21,6 +23,32 @@ public class Program
 
         builder.Services.AddApplicationServices(builder.Configuration, logger);
         builder.Services.AddJwtAuthentication(builder.Configuration);
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            options.AddPolicy("webhook_limit", httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown-ip",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 30,
+                        Window = TimeSpan.FromSeconds(60),
+                        QueueLimit = 0,
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+                    }));
+
+            options.AddPolicy("admin_limit", httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown-ip",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromSeconds(60),
+                        QueueLimit = 0,
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+                    }));
+        });
 
         var app = builder.Build();
 
@@ -65,6 +93,7 @@ public class Program
             RequestPath = ""
         });
 
+        app.UseRateLimiter();
         app.UseAuthenticationAndAuthorization();
     }
 
@@ -116,7 +145,8 @@ public class Program
                 webhookLogger.LogError(ex, "Error handling webhook request");
                 return Results.StatusCode(500);
             }
-        });
+        })
+        .RequireRateLimiting("webhook_limit");
 
         app.MapGet("/health", () => Results.Ok(new
         {
