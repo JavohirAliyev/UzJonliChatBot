@@ -8,25 +8,24 @@ public class ChatBotDbContextFactory : IDesignTimeDbContextFactory<ChatBotDbCont
 {
     public ChatBotDbContext CreateDbContext(string[] args)
     {
-        var basePath = Directory.GetCurrentDirectory();
-
-        if (!File.Exists(Path.Combine(basePath, "appSettings.Development.json")))
-        {
-            basePath = Path.Combine(basePath, "..", "UzJonliChatBot.BotHost");
-        }
+        var currentPath = Directory.GetCurrentDirectory();
+        var hostPath = Path.Combine(currentPath, "..", "UzJonliChatBot.BotHost");
+        var basePath = Directory.Exists(hostPath) ? hostPath : currentPath;
 
         var configuration = new ConfigurationBuilder()
             .SetBasePath(basePath)
-            .AddJsonFile("appSettings.Development.json", optional: false, reloadOnChange: false)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+            .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: false)
             .Build();
 
-        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        var connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection");
 
         if (string.IsNullOrEmpty(connectionString))
         {
             throw new InvalidOperationException(
-                "Connection string 'DefaultConnection' not found in appSettings.Development.json. " +
-                "Please ensure your connection string is configured.");
+                "Connection string 'DefaultConnection' was not found. " +
+                "Set 'ConnectionStrings:DefaultConnection' or environment variable 'ConnectionStrings__DefaultConnection'.");
         }
 
         var optionsBuilder = new DbContextOptionsBuilder<ChatBotDbContext>();
