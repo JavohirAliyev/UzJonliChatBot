@@ -30,6 +30,22 @@ public static class AdminEndpoints
         adminGroup.MapPost("/users/{telegramId}/unban", UnbanUserAsync)
             .RequireAuthorization("AdminOnly")
             .WithName("UnbanUser");
+
+        adminGroup.MapGet("/reports", GetReportsAsync)
+            .RequireAuthorization("AdminOnly")
+            .WithName("GetReports");
+
+        adminGroup.MapGet("/reports/{telegramId:long}", GetReportsByUserAsync)
+            .RequireAuthorization("AdminOnly")
+            .WithName("GetReportsByUser");
+
+        adminGroup.MapPost("/reports/{reportId:long}/dismiss", DismissReportAsync)
+            .RequireAuthorization("AdminOnly")
+            .WithName("DismissReport");
+
+        adminGroup.MapGet("/stats", GetStatsAsync)
+            .RequireAuthorization("AdminOnly")
+            .WithName("GetAdminStats");
     }
 
     private static async Task<IResult> LoginAsync(
@@ -123,6 +139,108 @@ public static class AdminEndpoints
         {
             logger.LogError(ex, "Error unbanning user {TelegramId}", telegramId);
             return Results.Problem("An error occurred while unbanning the user");
+        }
+    }
+
+    private static async Task<IResult> GetReportsAsync(
+        [FromServices] IReportRepository reportRepository,
+        [FromServices] ILogger<Program> logger)
+    {
+        try
+        {
+            var reports = await reportRepository.GetAllReportsAsync();
+            return Results.Ok(reports.Select(r => new
+            {
+                id = r.Id,
+                reporterTelegramId = r.ReporterTelegramId,
+                reporterUsername = r.ReporterUsername,
+                reportedTelegramId = r.ReportedTelegramId,
+                reportedUsername = r.ReportedUsername,
+                reason = r.Reason,
+                createdAt = r.CreatedAt,
+                isResolved = r.IsResolved,
+                resolvedAt = r.ResolvedAt
+            }));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error fetching reports");
+            return Results.Problem("An error occurred while fetching reports");
+        }
+    }
+
+    private static async Task<IResult> GetReportsByUserAsync(
+        [FromRoute] long telegramId,
+        [FromServices] IReportRepository reportRepository,
+        [FromServices] ILogger<Program> logger)
+    {
+        try
+        {
+            var reports = await reportRepository.GetReportsByReportedUserAsync(telegramId);
+            return Results.Ok(reports.Select(r => new
+            {
+                id = r.Id,
+                reporterTelegramId = r.ReporterTelegramId,
+                reporterUsername = r.ReporterUsername,
+                reportedTelegramId = r.ReportedTelegramId,
+                reportedUsername = r.ReportedUsername,
+                reason = r.Reason,
+                createdAt = r.CreatedAt,
+                isResolved = r.IsResolved,
+                resolvedAt = r.ResolvedAt
+            }));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error fetching reports for telegramId {TelegramId}", telegramId);
+            return Results.Problem("An error occurred while fetching reports for this user");
+        }
+    }
+
+    private static async Task<IResult> DismissReportAsync(
+        [FromRoute] long reportId,
+        [FromServices] IReportRepository reportRepository,
+        [FromServices] ILogger<Program> logger)
+    {
+        try
+        {
+            var dismissed = await reportRepository.DismissReportAsync(reportId);
+            if (!dismissed)
+            {
+                return Results.NotFound(new { message = "Report not found" });
+            }
+
+            return Results.Ok(new { message = "Report dismissed successfully" });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error dismissing report {ReportId}", reportId);
+            return Results.Problem("An error occurred while dismissing report");
+        }
+    }
+
+    private static async Task<IResult> GetStatsAsync(
+        [FromServices] IAdminStatsService adminStatsService,
+        [FromServices] ILogger<Program> logger)
+    {
+        try
+        {
+            var stats = await adminStatsService.GetStatsAsync();
+            return Results.Ok(new
+            {
+                totalUsers = stats.TotalUsers,
+                bannedUsers = stats.BannedUsers,
+                activeChats = stats.ActiveChats,
+                queuedUsers = stats.QueuedUsers,
+                totalReports = stats.TotalReports,
+                unresolvedReports = stats.UnresolvedReports,
+                registeredToday = stats.RegisteredToday
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error fetching admin stats");
+            return Results.Problem("An error occurred while fetching admin stats");
         }
     }
 }

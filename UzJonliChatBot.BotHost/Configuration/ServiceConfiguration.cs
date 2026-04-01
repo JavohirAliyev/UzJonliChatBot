@@ -20,12 +20,15 @@ public static class ServiceConfiguration
         services.AddScoped<IChatRepository, ChatRepository>();
         services.AddScoped<IMatchmakingQueueRepository, MatchmakingQueueRepository>();
         services.AddScoped<IAdminRepository, AdminRepository>();
+        services.AddScoped<IReportRepository, ReportRepository>();
         logger.LogInformation("Registered repositories");
 
         services.AddScoped<IRegistrationService, RegistrationService>();
         services.AddScoped<IMatchmakingService, MatchmakingService>();
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<IAdminService, AdminService>();
+        services.AddScoped<IReportService, ReportService>();
+        services.AddScoped<IAdminStatsService, AdminStatsService>();
         logger.LogInformation("Registered application services");
 
         var botClient = TelegramBotClientFactory.Create(configuration);

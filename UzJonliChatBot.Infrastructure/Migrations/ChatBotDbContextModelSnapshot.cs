@@ -89,6 +89,10 @@ namespace UzJonliChatBot.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<string>("GenderPreference")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
                     b.Property<DateTime>("QueuedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -101,6 +105,44 @@ namespace UzJonliChatBot.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("MatchmakingQueue");
+                });
+
+            modelBuilder.Entity("UzJonliChatBot.Infrastructure.Persistence.Entities.ReportEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsResolved")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<long>("ReportedUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ReporterUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReportedUserId");
+
+                    b.HasIndex("ReporterUserId", "ReportedUserId", "CreatedAt");
+
+                    b.ToTable("Reports");
                 });
 
             modelBuilder.Entity("UzJonliChatBot.Infrastructure.Persistence.Entities.UserEntity", b =>
@@ -122,6 +164,11 @@ namespace UzJonliChatBot.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
+
+                    b.Property<bool>("IsPremium")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsAgeVerified")
                         .HasColumnType("boolean");
@@ -190,7 +237,30 @@ namespace UzJonliChatBot.Infrastructure.Migrations
 
                     b.Navigation("ChatsAsUser2");
 
+                    b.Navigation("ReportsFiled");
+
+                    b.Navigation("ReportsReceived");
+
                     b.Navigation("QueueEntry");
+                });
+
+            modelBuilder.Entity("UzJonliChatBot.Infrastructure.Persistence.Entities.ReportEntity", b =>
+                {
+                    b.HasOne("UzJonliChatBot.Infrastructure.Persistence.Entities.UserEntity", "ReportedUser")
+                        .WithMany("ReportsReceived")
+                        .HasForeignKey("ReportedUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UzJonliChatBot.Infrastructure.Persistence.Entities.UserEntity", "ReporterUser")
+                        .WithMany("ReportsFiled")
+                        .HasForeignKey("ReporterUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ReportedUser");
+
+                    b.Navigation("ReporterUser");
                 });
 #pragma warning restore 612, 618
         }

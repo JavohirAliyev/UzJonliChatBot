@@ -9,6 +9,7 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
     public DbSet<UserEntity> Users { get; set; } = null!;
     public DbSet<ActiveChatEntity> ActiveChats { get; set; } = null!;
     public DbSet<MatchmakingQueueEntity> MatchmakingQueue { get; set; } = null!;
+    public DbSet<ReportEntity> Reports { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +35,7 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
             entity.Property(e => e.FullName).HasMaxLength(200);
             entity.Property(e => e.Username).HasMaxLength(100);
             entity.Property(e => e.Gender).IsRequired().HasMaxLength(10);
+            entity.Property(e => e.IsPremium).IsRequired().HasDefaultValue(false);
             entity.Property(e => e.IsAgeVerified).IsRequired();
             entity.Property(e => e.RegistrationStatus).IsRequired().HasMaxLength(50);
             entity.Property(e => e.IsBanned).IsRequired().HasDefaultValue(false);
@@ -82,11 +84,36 @@ public class ChatBotDbContext(DbContextOptions<ChatBotDbContext> options) : DbCo
             entity.HasIndex(e => e.UserId).IsUnique();
 
             entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.GenderPreference).HasMaxLength(10);
             entity.Property(e => e.QueuedAt).IsRequired();
 
             entity.HasOne(e => e.User)
                 .WithOne(u => u.QueueEntry)
                 .HasForeignKey<MatchmakingQueueEntity>(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReportEntity>(entity =>
+        {
+            entity.ToTable("Reports");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Reason).HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsResolved).IsRequired().HasDefaultValue(false);
+            entity.Property(e => e.ResolvedAt);
+
+            entity.HasIndex(e => e.ReportedUserId);
+            entity.HasIndex(e => new { e.ReporterUserId, e.ReportedUserId, e.CreatedAt });
+
+            entity.HasOne(e => e.ReporterUser)
+                .WithMany(u => u.ReportsFiled)
+                .HasForeignKey(e => e.ReporterUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ReportedUser)
+                .WithMany(u => u.ReportsReceived)
+                .HasForeignKey(e => e.ReportedUserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

@@ -99,6 +99,7 @@ public class TelegramUpdateHandler
         var registrationService = scope.ServiceProvider.GetRequiredService<IRegistrationService>();
         var matchmakingService = scope.ServiceProvider.GetRequiredService<IMatchmakingService>();
         var chatService = scope.ServiceProvider.GetRequiredService<IChatService>();
+        var reportService = scope.ServiceProvider.GetRequiredService<IReportService>();
         var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
 
         var userId = message.Chat.Id;
@@ -114,6 +115,14 @@ public class TelegramUpdateHandler
         if (text.StartsWith("/start"))
         {
             await HandleStartAsync(userId, registrationService);
+        }
+        else if (text.StartsWith("/premium"))
+        {
+            await _botClient.SendMessage(userId, "Premium features coming soon. Stay tuned!");
+        }
+        else if (text.StartsWith("/report"))
+        {
+            await HandleReportAsync(userId, text, registrationService, chatService, reportService);
         }
         else if (text.StartsWith("/keyingi") || text == BotMessages.MenuButtonFindPartner || text == BotMessages.MenuButtonNextPartner)
         {
@@ -286,7 +295,7 @@ public class TelegramUpdateHandler
 
             // 2. ATOMIC DEQUEUE + ENQUEUE operation
             sw.Restart();
-            var matchResult = await FindOrEnqueuePartnerAsync(userId, matchmakingService, chatService);
+            var matchResult = await matchmakingService.FindOrEnqueuePartnerAsync(userId);
             sw.Stop();
             _logger.LogDebug("FindOrEnqueuePartnerAsync completed for user {UserId} CorrelationId {CorrelationId} elapsedMs {ElapsedMs} status {Status}", userId, correlationId, sw.ElapsedMilliseconds, matchResult.Status);
 
@@ -297,6 +306,7 @@ public class TelegramUpdateHandler
                     break;
 
                 case MatchStatus.PartnerFound:
+                    await chatService.CreateChatAsync(userId, matchResult.PartnerId!.Value);
                     // 3. PARALLEL MESSAGE SENDING - Send both messages at once instead of sequentially
                     sw.Restart();
                     await NotifyMatchedUsersAsync(userId, matchResult.PartnerId!.Value);
@@ -368,64 +378,40 @@ public class TelegramUpdateHandler
         );
     }
 
-    /// <summary>
-    /// Atomic dequeue + enqueue operation with race condition handling.
-    /// </summary>
-    private async Task<MatchResultDto> FindOrEnqueuePartnerAsync(long userId, IMatchmakingService matchmakingService, IChatService chatService)
+    private async Task HandleReportAsync(
+        long userId,
+        string text,
+        IRegistrationService registrationService,
+        IChatService chatService,
+        IReportService reportService)
     {
-        var partner = await matchmakingService.DequeueUserAsync();
-
-        // Self-match prevention
-        if (partner.HasValue && partner.Value == userId)
+        if (!await registrationService.IsRegistered(userId))
         {
-            // Re-queue immediately - atomic operation
-            try
-            {
-                await matchmakingService.EnqueueUserAsync(userId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to re-queue user {UserId} after self-match", userId);
-            }
-            return new MatchResultDto { Status = MatchStatus.SelfMatched };
+            await _botClient.SendMessage(userId, BotMessages.NotRegistered);
+            return;
         }
 
-        if (partner.HasValue)
+        if (!await chatService.IsInChatAsync(userId))
         {
-            // Partner found - create chat atomically
-            try
-            {
-                await chatService.CreateChatAsync(userId, partner.Value);
-                return new MatchResultDto
-                {
-                    Status = MatchStatus.PartnerFound,
-                    PartnerId = partner.Value
-                };
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to create chat between {UserId} and {PartnerId}", userId, partner.Value);
-                // Fallback: enqueue current user
-                try
-                {
-                    await matchmakingService.EnqueueUserAsync(userId);
-                }
-                catch { }
-                return new MatchResultDto { Status = MatchStatus.Enqueued };
-            }
+            await _botClient.SendMessage(userId, "❌ You can only report while in an active chat.");
+            return;
         }
 
-        // No partner - enqueue user
-        try
+        var partnerId = await chatService.GetPartnerAsync(userId);
+        if (!partnerId.HasValue)
         {
-            await matchmakingService.EnqueueUserAsync(userId);
-            return new MatchResultDto { Status = MatchStatus.Enqueued };
+            await _botClient.SendMessage(userId, BotMessages.Error);
+            return;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to enqueue user {UserId}", userId);
-            return new MatchResultDto { Status = MatchStatus.Enqueued }; // User likely already in queue
-        }
+
+        var reason = text.Length > 7 ? text[7..].Trim() : null;
+        var result = await reportService.ReportUserAsync(userId, partnerId.Value, reason);
+
+        var confirmation = result.Success
+            ? "✅ Report submitted. Thank you, this conversation will be reviewed by moderators."
+            : $"❌ Report failed: {result.Message}";
+
+        await _botClient.SendMessage(userId, confirmation);
     }
 
     /// <summary>

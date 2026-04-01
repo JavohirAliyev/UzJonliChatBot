@@ -16,10 +16,12 @@ public enum UserRegistrationStatus
 
 public class User
 {
+    public long Id { get; set; }
     public long TelegramId { get; set; }
     public string? FullName { get; set; }
     public string? Username { get; set; }
     public Gender Gender { get; set; }
+    public bool IsPremium { get; set; }
     public bool IsAgeVerified { get; set; }
     public UserRegistrationStatus RegistrationStatus { get; set; }
     public bool IsBanned { get; set; }
@@ -29,6 +31,7 @@ public class User
     public User()
     {
         Gender = Gender.Male;
+        IsPremium = false;
         RegistrationStatus = UserRegistrationStatus.NotStarted;
         IsAgeVerified = false;
         IsBanned = false;

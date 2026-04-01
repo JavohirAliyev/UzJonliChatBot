@@ -49,6 +49,7 @@ public class UserRepository : IUserRepository
         entity.FullName = user.FullName;
         entity.Username = user.Username;
         entity.Gender = user.Gender.ToString();
+        entity.IsPremium = user.IsPremium;
         entity.IsAgeVerified = user.IsAgeVerified;
         entity.RegistrationStatus = user.RegistrationStatus.ToString();
         entity.IsBanned = user.IsBanned;
@@ -137,10 +138,12 @@ public class UserRepository : IUserRepository
 
         return new User
         {
+            Id = entity.Id,
             TelegramId = entity.TelegramId,
             FullName = entity.FullName,
             Username = entity.Username,
             Gender = Enum.Parse<Gender>(entity.Gender, ignoreCase: true),
+            IsPremium = entity.IsPremium,
             IsAgeVerified = entity.IsAgeVerified,
             RegistrationStatus = Enum.Parse<UserRegistrationStatus>(entity.RegistrationStatus),
             IsBanned = entity.IsBanned,
@@ -309,7 +312,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         _logger = logger;
     }
 
-    public async Task EnqueueAsync(long userId)
+    public async Task EnqueueAsync(long userId, string? genderPreference = null)
     {
         await using var context = await _contextFactory.CreateDbContextAsync();
         var sw = Stopwatch.StartNew();
@@ -342,6 +345,7 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
                     context.MatchmakingQueue.Add(new MatchmakingQueueEntity
                     {
                         UserId = user.Id,
+                        GenderPreference = string.IsNullOrWhiteSpace(genderPreference) ? null : genderPreference,
                         QueuedAt = DateTime.UtcNow
                     });
 
@@ -410,6 +414,52 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
         }
     }
 
+    public async Task<long?> DequeueByPartnerGenderAsync(string preferredGender)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var strategy = context.Database.CreateExecutionStrategy();
+
+            return await strategy.ExecuteAsync<long?>(async () =>
+            {
+                using var transaction = await context.Database.BeginTransactionAsync(
+                    System.Data.IsolationLevel.RepeatableRead);
+                try
+                {
+                    var entry = await context.MatchmakingQueue
+                        .Where(q => q.User.Gender == preferredGender)
+                        .OrderBy(q => q.QueuedAt)
+                        .Select(q => new { q.Id, q.User.TelegramId })
+                        .FirstOrDefaultAsync();
+
+                    if (entry == null)
+                    {
+                        await transaction.CommitAsync();
+                        return null;
+                    }
+
+                    await context.Database.ExecuteSqlInterpolatedAsync(
+                        $"DELETE FROM \"MatchmakingQueue\" WHERE \"Id\" = {entry.Id}");
+
+                    await transaction.CommitAsync();
+                    return entry.TelegramId;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
+            });
+        }
+        finally
+        {
+            sw.Stop();
+            _logger?.LogDebug("DequeueByPartnerGenderAsync for gender {PreferredGender} elapsedMs {ElapsedMs}", preferredGender, sw.ElapsedMilliseconds);
+        }
+    }
+
     public async Task RemoveFromQueueAsync(long telegramId)
     {
         await using var context = await _contextFactory.CreateDbContextAsync();
@@ -460,6 +510,116 @@ public class MatchmakingQueueRepository : IMatchmakingQueueRepository
             sw.Stop();
             _logger?.LogDebug("IsInQueueAsync for telegramId {TelegramId} elapsedMs {ElapsedMs}", telegramId, sw.ElapsedMilliseconds);
         }
+    }
+}
+
+public class ReportRepository : IReportRepository
+{
+    private readonly IDbContextFactory<ChatBotDbContext> _contextFactory;
+
+    public ReportRepository(IDbContextFactory<ChatBotDbContext> contextFactory)
+    {
+        _contextFactory = contextFactory;
+    }
+
+    public async Task AddReportAsync(Report report)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        context.Reports.Add(new ReportEntity
+        {
+            ReporterUserId = report.ReporterUserId,
+            ReportedUserId = report.ReportedUserId,
+            Reason = report.Reason,
+            CreatedAt = DateTime.UtcNow,
+            IsResolved = false
+        });
+
+        await context.SaveChangesAsync();
+    }
+
+    public async Task<IEnumerable<ReportView>> GetReportsByReportedUserAsync(long telegramId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        return await context.Reports
+            .AsNoTracking()
+            .Where(r => r.ReportedUser.TelegramId == telegramId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new ReportView
+            {
+                Id = r.Id,
+                ReporterTelegramId = r.ReporterUser.TelegramId,
+                ReporterUsername = r.ReporterUser.Username,
+                ReportedTelegramId = r.ReportedUser.TelegramId,
+                ReportedUsername = r.ReportedUser.Username,
+                Reason = r.Reason,
+                CreatedAt = r.CreatedAt,
+                IsResolved = r.IsResolved,
+                ResolvedAt = r.ResolvedAt
+            })
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<ReportView>> GetAllReportsAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        return await context.Reports
+            .AsNoTracking()
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new ReportView
+            {
+                Id = r.Id,
+                ReporterTelegramId = r.ReporterUser.TelegramId,
+                ReporterUsername = r.ReporterUser.Username,
+                ReportedTelegramId = r.ReportedUser.TelegramId,
+                ReportedUsername = r.ReportedUser.Username,
+                Reason = r.Reason,
+                CreatedAt = r.CreatedAt,
+                IsResolved = r.IsResolved,
+                ResolvedAt = r.ResolvedAt
+            })
+            .ToListAsync();
+    }
+
+    public async Task<bool> HasRecentDuplicateAsync(long reporterUserId, long reportedUserId, TimeSpan window)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var threshold = DateTime.UtcNow.Subtract(window);
+        return await context.Reports.AsNoTracking().AnyAsync(r =>
+            r.ReporterUserId == reporterUserId &&
+            r.ReportedUserId == reportedUserId &&
+            r.CreatedAt >= threshold);
+    }
+
+    public async Task<bool> DismissReportAsync(long reportId)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+
+        var report = await context.Reports.FirstOrDefaultAsync(r => r.Id == reportId);
+        if (report == null)
+        {
+            return false;
+        }
+
+        report.IsResolved = true;
+        report.ResolvedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<int> GetTotalReportsCountAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        return await context.Reports.AsNoTracking().CountAsync();
+    }
+
+    public async Task<int> GetUnresolvedReportsCountAsync()
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        return await context.Reports.AsNoTracking().CountAsync(r => !r.IsResolved);
     }
 }
 
